@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import h5py # type: ignore
 from pynwb import NWBFile, NWBHDF5IO
 from pynwb.base import TimeSeries
-from pynwb.ecephys import ElectricalSeries
+from pynwb.ecephys import ElectricalSeries, ElectrodeGroup
 import numpy as np
 
 #load raw time series data for brw and bxr files 
@@ -86,16 +86,37 @@ def DecodeEventBasedRawData(file, data, wellID, startFrame, numFrames):
                 rangeDataPos += 2
                 pos += (toExclusive - fromInclusive) * 2
 
+def create_electrode_table(nwbfile, num_channels):
+    # Create an ElectrodeGroup
+    electrode_group = ElectrodeGroup(name='electrode_group',
+                                     description='electrode group',
+                                     location='unknown',
+                                     device=nwbfile.create_device(name='device_name'))
+    nwbfile.add_electrode_group(electrode_group)
+
+    # Create an ElectrodeTable
+    for i in range(num_channels):
+        nwbfile.add_electrode(id=i, x=np.nan, y=np.nan, z=np.nan,
+                              imp=np.nan, location='unknown', filtering='',
+                              group=electrode_group)
+    electrode_table_region = nwbfile.create_electrode_table_region(
+        list(range(num_channels)), 'electrodes'
+    )
+    return electrode_table_region
+
 def convert_biocam_to_nwb(input_file, output_file):
     with h5py.File(input_file, 'r') as file:
         metadata = extract_metadata(file)
-        well_id = 'WellA1'
         
         # Determine file extension
         file_extension = input_file.split('.')[-1]
 
         data, timestamps = load_spike_data(file, file_extension)
         
+        # Print shapes for debugging
+        print(f'Data shape: {data.shape}')
+        print(f'Timestamps shape: {timestamps.shape}')
+
         # Prepare NWB file
         nwbfile = NWBFile(
             session_description=metadata["description"],
@@ -119,15 +140,16 @@ def convert_biocam_to_nwb(input_file, output_file):
                 unit='seconds',
                 timestamps=timestamps
             )
+            num_channels = data.shape[1] if data.ndim > 1 else 1
+            electrodes = create_electrode_table(nwbfile, num_channels)
             spike_forms_series = ElectricalSeries(
                 name='SpikeForms',
                 data=data,
-                electrodes=np.arange(data.shape[1]),
+                electrodes=electrodes,
                 starting_time=0.0,
                 rate=metadata["sampling_rate"],
                 conversion=1.0,
-                resolution=-1.0,
-                unit='microvolts'
+                resolution=-1.0
             )
             nwbfile.add_acquisition(spike_timeseries)
             nwbfile.add_acquisition(spike_forms_series)
