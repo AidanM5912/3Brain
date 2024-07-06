@@ -2,45 +2,51 @@ import argparse
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import h5py # type: ignore
-from pynwb import NWBFile, NWBHDF5IO, TimeSeries, ElectricalSeries #type: ignore
+from pynwb import NWBFile, NWBHDF5IO
+from pynwb.base import TimeSeries
+from pynwb.ecephys import ElectricalSeries
 import numpy as np
 
 #load raw time series data for brw and bxr files 
-def load_spike_data(file_path, file_extension):
-    with h5py.File(file_path, 'r') as f:
-        if file_extension == 'brw':
-            data = f['/Well_A1/EventsBasedSparseRaw'][:]
-            timestamps = np.arange(data.shape[0]) / f.attrs.get("SamplingRate", 1.0)
-        elif file_extension == 'bxr':
-            spike_times = f['/Well_A1/SpikeTimes'][:]
-            spike_forms = f['/Well_A1/SpikeForms'][:]
-            timestamps = spike_times / f.attrs.get("SamplingRate", 1.0)
-        return data, timestamps
+def load_spike_data(file, file_extension):
+    well_id = '/Well_A1'
+    if file_extension == 'brw':
+        timestamps = np.array(file['TOC'][:, 0])
+        data = np.zeros((len(timestamps), len(file[well_id + '/EventsBasedSparseRaw'])), dtype=np.int16)
+        DecodeEventBasedRawData(file, data, well_id, 0, len(timestamps))
+    elif file_extension == 'bxr':
+        spike_times = file[well_id + '/SpikeTimes'][:]
+        spike_forms = file[well_id + '/SpikeForms'][:]
+        timestamps = spike_times / file.attrs.get("SamplingRate", 1.0)
+        data = spike_forms
+    return data, timestamps
 
 #extract metadata
-def extract_metadata(file_path):
-    with h5py.File(file_path, 'r') as f:
-        metadata = {
-            "description": f.attrs.get("Description", "No description").decode('utf-8'),
-            "sampling_rate": f.attrs.get("SamplingRate", 1.0),
-            "session_start_time": f.attrs.get("ExperimentDateTimeUtc", None),
-            "experiment_type": f.attrs.get("ExperimentType", "Unknown"),
-            "guid": f.attrs.get("GUID", "No GUID").decode('utf-8'),
-            "source_guid": f.attrs.get("SourceGUID", "No SourceGUID").decode('utf-8'),
-            "max_analog_value": f.attrs.get("MaxAnalogValue", None),
-            "max_digital_value": f.attrs.get("MaxDigitalValue", None),
-            "min_analog_value": f.attrs.get("MinAnalogValue", None),
-            "min_digital_value": f.attrs.get("MinDigitalValue", None),
-            "plate_model": f.attrs.get("PlateModel", None),
-            "version": f.attrs.get("Version", None)
-        }
-        if metadata["session_start_time"] is not None:
-            # convert timestamp to datetime (assuming a Unix timestamp in nanoseconds)
-            metadata["session_start_time"] = datetime.fromtimestamp(metadata["session_start_time"] / 1e9, tz=timezone.utc)
-        else:
-            # default session start time if not found in metadata
-            # this needs to be something different but for now its the current time and date
-            metadata["session_start_time"] = datetime(2020, 1, 1, 12, 30, 0, tzinfo=ZoneInfo("US/Pacific"))
+def extract_metadata(file):
+    def decode_attr(attr, default):
+        value = file.attrs.get(attr, default)
+        return value.decode('utf-8') if isinstance(value, bytes) else value
+    metadata = {
+        "description": decode_attr("Description", "No description"),
+        "sampling_rate": file.attrs.get("SamplingRate", 1.0),
+        "session_start_time": file.attrs.get("ExperimentDateTimeUtc", None),
+        "experiment_type": decode_attr("ExperimentType", "Unknown"),
+        "guid": decode_attr("GUID", "No GUID"),
+        "source_guid": decode_attr("SourceGUID", "No SourceGUID"),
+        "max_analog_value": file.attrs.get("MaxAnalogValue", None),
+        "max_digital_value": file.attrs.get("MaxDigitalValue", None),
+        "min_analog_value": file.attrs.get("MinAnalogValue", None),
+        "min_digital_value": file.attrs.get("MinDigitalValue", None),
+        "plate_model": file.attrs.get("PlateModel", None),
+        "version": file.attrs.get("Version", None)
+    }
+    if metadata["session_start_time"] is not None:
+        # convert timestamp to datetime (assuming a Unix timestamp in nanoseconds)
+        metadata["session_start_time"] = datetime.fromtimestamp(metadata["session_start_time"] / 1e9, tz=timezone.utc)
+    else:
+        # default session start time if not found in metadata
+        # this needs to be something different but for now its the current time and date
+        metadata["session_start_time"] = datetime(2020, 1, 1, 12, 30, 0, tzinfo=ZoneInfo("US/Pacific"))
     return metadata
 
 #adding this from the script arianna sent
@@ -87,13 +93,8 @@ def convert_biocam_to_nwb(input_file, output_file):
         
         # Determine file extension
         file_extension = input_file.split('.')[-1]
-        
-        if file_extension == 'brw':
-            timestamps = np.array(file['TimeStamps'])
-            data = np.zeros((len(timestamps), len(file[well_id + '/EventsBasedSparseRaw'])), dtype=np.int16)
-            DecodeEventBasedRawData(file, data, well_id, 0, len(timestamps))
-        elif file_extension == 'bxr':
-            data, timestamps = load_spike_data(file, well_id)
+
+        data, timestamps = load_spike_data(file, file_extension)
         
         # Prepare NWB file
         nwbfile = NWBFile(
