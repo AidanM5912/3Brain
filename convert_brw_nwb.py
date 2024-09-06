@@ -1,6 +1,8 @@
 import sys
 import h5py
 import argparse
+import os
+import braingeneers.utils.s3wrangler as wr
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from neuroconv.datainterfaces import BiocamRecordingInterface
@@ -36,33 +38,51 @@ def extract_metadata(file):
     return metadata
 
 def convert_brw_to_nwb(input_file, output_file):
+    print(f"Starting conversion from {input_file} to {output_file}")
+    
+    # Initialize the BiocamRecordingInterface to handle BRW data
     interface = BiocamRecordingInterface(file_path=input_file, verbose=True)
 
-    # extract and prepare metadata
+    # Extract and prepare metadata
     extracted_metadata = extract_metadata(h5py.File(input_file, 'r'))
     metadata = interface.get_metadata()
     
-    # update NWBFile metadata
+    # Update NWBFile metadata
     metadata["NWBFile"].update({
         "session_start_time": extracted_metadata["session_start_time"].isoformat(),
         "session_description": extracted_metadata["session_description"],
         "identifier": extracted_metadata["session_id"]
     })
-    # convert
+    
+    # Run the conversion process
     interface.run_conversion(nwbfile_path=output_file, metadata=metadata)
 
     print(f'Converted {input_file} to {output_file} using Neuroconv')
 
 
 if __name__ == '__main__':
+    print("Starting script...")
     parser = argparse.ArgumentParser(description='Convert BRW data to NWB format.')
-    parser.add_argument('input_file', type=str, help='Path to the input .brw file')
-    parser.add_argument('output_file', type=str, help='Path to the output .nwb file')
+    parser.add_argument('input_file', type=str, help='S3 URI for the input .brw file')
+    parser.add_argument('output_file', type=str, help='S3 URI for the output .nwb file')
     args = parser.parse_args()
 
-    file_extension = args.input_file.split('.')[-1].lower()
+    input_s3 = args.input_file
+    output_s3 = args.output_file
 
-    if file_extension == 'brw':
-        convert_brw_to_nwb(args.input_file, args.output_file)
-    else:
-        print(f"Unsupported file extension: {file_extension}. Please provide a .brw file.")
+    # Create a temporary local directory for processing
+    local_input = '/tmp/input_file.brw'
+    local_output = '/tmp/output_file.nwb'
+
+    # Download the file from S3 to local using braingeneers' s3wrangler
+    print(f"Downloading {input_s3} to {local_input}")
+    wr.download(input_s3, local_input)
+
+    # Convert the file locally
+    convert_brw_to_nwb(local_input, local_output)
+
+    # Upload the NWB file back to S3 using s3wrangler
+    print(f"Uploading {local_output} to {output_s3}")
+    wr.upload(local_output, output_s3)
+
+    print("Conversion complete and file uploaded to S3.")
