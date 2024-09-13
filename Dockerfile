@@ -7,7 +7,8 @@ RUN apt-get update && apt-get install -y time
 RUN pip install h5py \
 neuroconv \ 
 spikeinterface \ 
-braingeneers
+braingeneers \
+python-dateutil
 
 #PRP setup
 ENV ENDPOINT_URL="https://s3.braingeneers.gi.ucsc.edu"

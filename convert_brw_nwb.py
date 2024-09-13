@@ -1,13 +1,31 @@
 import sys
 import h5py
+import json
 import argparse
-import os
-import braingeneers.utils.s3wrangler as wr
+from dateutil import parser as dateutil_parser  # Rename to avoid conflict
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo  # Used for setting the PST timezone
+import braingeneers.utils.s3wrangler as wr
 from neuroconv.datainterfaces import BiocamRecordingInterface
 
-def extract_metadata(file):
+# New function to extract timestamp from the 3Brain file and set it to PST
+def get_time_stamp_3brain(file_path):
+    meta_time_stamp = None
+    with h5py.File(file_path, "r") as f:
+        exp_setting = f["ExperimentSettings"][()][0]  # Get the ExperimentSettings data
+        exp_setting = json.loads(exp_setting.decode('utf-8'))  # Decode the JSON data
+        ts_org = dateutil_parser.isoparse(exp_setting["ExperimentDateTime"])  # Parse the timestamp
+        
+        # Set timezone to PST (Pacific Standard Time) using ZoneInfo
+        pst_timezone = ZoneInfo("America/Los_Angeles")
+        ts_org = ts_org.replace(tzinfo=pst_timezone)  # Apply PST to the timestamp
+        
+        # Format the timestamp in ISO format with the timezone
+        meta_time_stamp = ts_org.isoformat()
+        print("3brain Time stamp with PST:", meta_time_stamp)
+    return meta_time_stamp
+
+def extract_metadata(file, file_path):
     def decode_attr(attr, default):
         value = file.attrs.get(attr, default)
         return value.decode('utf-8') if isinstance(value, bytes) else value
@@ -15,7 +33,8 @@ def extract_metadata(file):
     metadata = {
         "session_description": decode_attr("Description", "No description"),
         "sampling_rate": file.attrs.get("SamplingRate", 1.0),
-        "session_start_time": file.attrs.get("ExperimentDateTimeUtc", None),
+        # Correctly passing file_path (the string) to get_time_stamp_3brain
+        "session_start_time": get_time_stamp_3brain(file_path),  
         "session_id": decode_attr("GUID", "No GUID"),
         "max_analog_value": file.attrs.get("MaxAnalogValue", None),
         "max_digital_value": file.attrs.get("MaxDigitalValue", None),
@@ -27,35 +46,32 @@ def extract_metadata(file):
         "version": file.attrs.get("Version", None)
     }
     
-    if metadata["session_start_time"] is not None:
-        # convert timestamp to datetime (assuming a Unix timestamp in nanoseconds)
-        metadata["session_start_time"] = datetime.fromtimestamp(metadata["session_start_time"] / 1e9, tz=timezone.utc)
-    else:
-        # default session start time if not found in metadata
-        metadata["session_start_time"] = datetime(2024, 1, 30, 12, 30, 0, tzinfo=ZoneInfo("US/Pacific"))
-    
     print(f"Extracted metadata: {metadata}")
     return metadata
 
 def convert_brw_to_nwb(input_file, output_file):
     print(f"Starting conversion from {input_file} to {output_file}")
-    
-    # Initialize the BiocamRecordingInterface to handle BRW data
-    interface = BiocamRecordingInterface(file_path=input_file, verbose=True)
 
-    # Extract and prepare metadata
-    extracted_metadata = extract_metadata(h5py.File(input_file, 'r'))
-    metadata = interface.get_metadata()
+    # Open the input file once and pass it to both functions
+    with h5py.File(input_file, 'r') as file:
+        # Extract and prepare metadata, passing the file path for the timestamp extraction
+        extracted_metadata = extract_metadata(file, input_file)
+
+        # Initialize the BiocamRecordingInterface to handle BRW data
+        interface = BiocamRecordingInterface(file_path=input_file, verbose=True)
+
+        # Fetch additional metadata from the interface
+        metadata = interface.get_metadata()
     
-    # Update NWBFile metadata
-    metadata["NWBFile"].update({
-        "session_start_time": extracted_metadata["session_start_time"].isoformat(),
-        "session_description": extracted_metadata["session_description"],
-        "identifier": extracted_metadata["session_id"]
-    })
+        # Update NWBFile metadata
+        metadata["NWBFile"].update({
+            "session_start_time": extracted_metadata["session_start_time"],  # Use the correct timestamp
+            "session_description": extracted_metadata["session_description"],
+            "identifier": extracted_metadata["session_id"]
+        })
     
-    # Run the conversion process
-    interface.run_conversion(nwbfile_path=output_file, metadata=metadata)
+        # Run the conversion process
+        interface.run_conversion(nwbfile_path=output_file, metadata=metadata)
 
     print(f'Converted {input_file} to {output_file} using Neuroconv')
 

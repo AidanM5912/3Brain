@@ -25,7 +25,7 @@ spec:
         command: ["stdbuf", "-i0", "-o0", "-e0", "/usr/bin/time", "-v", "bash", "-c"]
         args:
          - >- #just need to know output path
-          python convert_brw_nwb.py s3://braingeneers/ephys/2024-08-19-e-3brain-test/original/data/Dorsal_3DAccura_00.brw s3://braingeneers/ephys/2024-08-19-e-3brain-test/shared/Dorsal_3DAccura_00.nwb
+          python convert_brw_nwb.py s3://braingeneers/ephys/2024-08-19-e-3brain-test/original/data/Dorsal_3DAccura_00.brw s3://braingeneers/ephys/2024-08-19-e-3brain-test/shared/Dorsal_3DAccura_00_test2.nwb
         env:
           - name: "PYTHONUNBUFFERED"
             value: "true"
