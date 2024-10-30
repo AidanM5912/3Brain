@@ -1,0 +1,8 @@
+numpy
+deprecated
+numba
+tbb
+h5py
+scipy
+glances
+json

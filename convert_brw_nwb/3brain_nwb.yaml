@@ -1,0 +1,53 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: biocam-converter
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      containers:
+      - name: biocam-converter
+        image: aidanmorson/biocam_converter:latest
+        imagePullPolicy: Always
+        resources:
+
+          # GPU Run
+          requests:
+            cpu: "4"
+            memory: "32Gi"
+            ephemeral-storage: "50Gi"
+          limits:
+            cpu: "4"
+            memory: "32Gi"
+            ephemeral-storage: "50Gi"
+
+        command: ["stdbuf", "-i0", "-o0", "-e0", "/usr/bin/time", "-v", "python", "convert_brw_nwb.py"]
+        args:
+          - s3://braingeneersdev/amorson/00_AccuraV23D_CorticalOrganoidDAY180_Basal_NoiseBlanking/original/data/00_AccuraV23D_CorticalOrganoidDAY180_Basal_NoiseBlanking.bxr
+          - s3://braingeneersdev/amorson/00_AccuraV23D_CorticalOrganoidDAY180_Basal_NoiseBlanking/derived/kilosort2/00_AccuraV23D_CorticalOrganoidDAY180_Basal_NoiseBlanking.nwb
+        env:
+          - name: "PYTHONUNBUFFERED"
+            value: "true"
+
+          # Ceph (internal)
+          - name: "ENDPOINT_URL"
+            value: "https://s3.braingeneers.gi.ucsc.edu"  # ceph internal
+          - name: "S3_ENDPOINT"
+            value: "s3.braingeneers.gi.ucsc.edu" # ceph internal
+
+        volumeMounts:
+
+          # Ceph credentials
+          - name: "prp-s3-credentials"
+            mountPath: "/root/.aws/credentials"
+            subPath: "credentials"
+
+      restartPolicy: Never
+      volumes:
+        # Secrets file for nautilus s3 credentials .aws/credentials and .s3cfg
+        - name: prp-s3-credentials
+          secret:
+            secretName: prp-s3-credentials
+        - name: ephemeral
+          emptyDir: {}

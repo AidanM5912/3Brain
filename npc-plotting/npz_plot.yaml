@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: npz-plots
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      containers:
+      - name: npz-plots
+        image: aidanmorson/npz-plotting:v1
+        imagePullPolicy: Always
+        resources:
+
+          # GPU Run
+          requests:
+            cpu: "4"
+            memory: "32Gi"
+            ephemeral-storage: "50Gi"
+          limits:
+            cpu: "4"
+            memory: "32Gi"
+            ephemeral-storage: "50Gi"
+
+        command: ["stdbuf", "-i0", "-o0", "-e0", "/usr/bin/time", "-v", "python", "aws_npz_plot_gen.py"]
+        args:
+          - s3://braingeneersdev/amorson/Ventral_3DAccura_00/derived/kilosort2/Ventral_3DAccura_00_params_default_acqm.zip
+          - s3://braingeneersdev/amorson/ventral_np_test1/
+
+        env:
+          - name: "PYTHONUNBUFFERED"
+            value: "true"
+
+          # Ceph (internal)
+          - name: "ENDPOINT_URL"
+            value: "https://s3.braingeneers.gi.ucsc.edu"  # ceph internal
+          - name: "S3_ENDPOINT"
+            value: "s3.braingeneers.gi.ucsc.edu" # ceph internal
+
+        volumeMounts:
+
+          # Ceph credentials
+          - name: "prp-s3-credentials"
+            mountPath: "/root/.aws/credentials"
+            subPath: "credentials"
+
+      restartPolicy: Never
+      volumes:
+        # Secrets file for nautilus s3 credentials .aws/credentials and .s3cfg
+        - name: prp-s3-credentials
+          secret:
+            secretName: prp-s3-credentials
+        - name: ephemeral
+          emptyDir: {}
