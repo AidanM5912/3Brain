@@ -331,7 +331,7 @@ class SpikeDataAnalysis:
 
             # create the individual plot for the current dataset
             plt.figure(figsize=(12, 8))
-            plt.violinplot(sttc_values)
+            plt.violinplot(sttc_values, showmeans=True)
             plt.xticks(ticks=np.arange(1, len(labels) + 1), labels=labels, rotation=45, ha='right')
             plt.xlabel('Firing Rate Group')
             plt.ylabel('STTC Values')
@@ -354,7 +354,7 @@ class SpikeDataAnalysis:
                 combined_labels.append(f"{dataset_name} - {group_name.capitalize()}")
 
         plt.figure(figsize=(12, 8))
-        plt.violinplot(combined_sttc_values)
+        plt.violinplot(combined_sttc_values, showmeans=True)
         plt.xticks(ticks=np.arange(1, len(combined_labels) + 1), labels=combined_labels, rotation=45, ha='right')
         plt.xlabel('Firing Rate Group')
         plt.ylabel('STTC Values')
@@ -383,7 +383,7 @@ class SpikeDataAnalysis:
 
             # create the individual plot for the current dataset
             plt.figure(figsize=(12, 8))
-            plt.violinplot(sttc_values)
+            plt.violinplot(sttc_values, showmeans=True)
             plt.xticks(ticks=np.arange(1, len(labels) + 1), labels=labels, rotation=45, ha='right')
             plt.xlabel('Proximity Group')
             plt.ylabel('STTC Values')
@@ -408,7 +408,7 @@ class SpikeDataAnalysis:
                 combined_labels.append(f"{dataset_name} - {group_name.capitalize()}")
 
         plt.figure(figsize=(12, 8))
-        plt.violinplot(combined_sttc_values)
+        plt.violinplot(combined_sttc_values, showmeans=True)
         plt.xticks(ticks=np.arange(1, len(combined_labels) + 1), labels=combined_labels, rotation=45, ha='right')
         plt.xlabel('Proximity Group')
         plt.ylabel('STTC Values')
@@ -435,7 +435,7 @@ class SpikeDataAnalysis:
             labels.append(dataset_names[i])
 
         plt.figure(figsize=(12, 8))
-        plt.violinplot(sttc_values_list)
+        plt.violinplot(sttc_values_list, showmeans=True)
         plt.xticks(ticks=np.arange(1, len(labels) + 1), labels=labels, rotation=45, ha ='right')
         plt.xlabel('Recordings')
         plt.ylabel('STTC Values')
