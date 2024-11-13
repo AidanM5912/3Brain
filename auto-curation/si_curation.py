@@ -16,6 +16,7 @@ from utils import *
 import logging
 import h5py
 import json
+import re
 
 # BUCKET = "s3://braingeneers/ephys/"
 JOB_KWARGS = dict(n_jobs=10, progress_bar=True)
@@ -28,9 +29,12 @@ logging.basicConfig(level=logging.INFO,
                     handlers=[logging.FileHandler(LOG_FILE_NAME, mode="a"),
                               stream_handler])
 
-DEFUALT_PARAMS = {"min_snr": 5,
+DEFUALT_PARAMS = {"min_snr": 5, 
                   "min_fr": 0.5,
                   "max_isi_viol": 1}
+##old parameters:
+##snr:5, fr:.1, isi:.2
+
 
 class QualityMetrics:
     """
@@ -433,36 +437,36 @@ def upload_file(phy_path, local_file, params_file_name=None, file_type="qm"):
     wr.upload(local_file=local_file, path=upload_path)
     logging.info("Done!")
 
+def parse_uuid(uuid_path):
+    """
+    Matches raw data files in `original/data/` to corresponding `_phy.zip` files in `derived/kilosort2/`.
+    Assumes filenames match exactly except for the extension.
+    """
+    # Define paths relative to the UUID path
+    original_data_path = posixpath.join(uuid_path, "original/data")
+    derived_kilosort_path = posixpath.join(uuid_path, "derived/kilosort2")
+    metadata_path = posixpath.join(uuid_path, "metadata.json")
 
-def parse_uuid(data_path):
-    # Remove any trailing slashes
-    data_path = data_path.rstrip("/")
-    
-    # Extract 'experiment' as the last part of the path and define 'base_path'
-    experiment = data_path.split("/")[-3]
-    base_path = data_path.rsplit("/", 2)[0]  # Get up to 'Ventral_3DAccura_00'
-    
-    # Define paths based on the 'original/data' or 'shared' in base_path
-    if "original/data" in data_path:
-        phy_base_path = posixpath.join(base_path, "derived/kilosort2")
-        metadata_path = posixpath.join(base_path, "metadata.json")
-    elif "shared" in data_path:
-        phy_base_path = posixpath.join(base_path, "derived/kilosort2")
-        metadata_path = posixpath.join(base_path, "metadata.json")
-    else:
-        # If neither "original/data" nor "shared" are found, set default paths
-        phy_base_path = posixpath.join(base_path, "derived/kilosort2")
-        metadata_path = posixpath.join(base_path, "metadata.json")
+    # List all files in original/data/ and derived/kilosort2/
+    raw_data_files = wr.list_objects(original_data_path)
+    derived_files = wr.list_objects(derived_kilosort_path)
 
-    # Clean up 'experiment' to remove file extensions
-    if experiment.endswith(".raw.h5") or experiment.endswith(".h5"):
-        experiment = experiment.rsplit(".", 1)[0]
-    elif experiment.endswith(".brw") or experiment.endswith(".nwb"):
-        experiment = experiment.rsplit(".", 1)[0]
+    # Extract all *_phy.zip files in derived/kilosort2
+    phy_files = [file for file in derived_files if file.endswith("_phy.zip")]
 
-    # Define 'phy_path' based on 'phy_base_path' and 'experiment'
-    phy_path = posixpath.join(phy_base_path, experiment + "_phy.zip")
-    return base_path, experiment, metadata_path, phy_path
+    # Match each raw data file to a corresponding *_phy.zip file by base filename
+    matched_pairs = {}
+    for raw_data in raw_data_files:
+        # Get the base filename without the extension
+        base_name = posixpath.splitext(posixpath.basename(raw_data))[0]
+
+        # Try to find a matching *_phy.zip file
+        matching_phy = next((phy for phy in phy_files if posixpath.basename(phy).startswith(base_name)), None)
+
+        if matching_phy:
+            matched_pairs[base_name] = (raw_data, matching_phy)
+
+    return metadata_path, matched_pairs
 
 def hash_file_name(input_string):
     import hashlib
@@ -472,126 +476,111 @@ def hash_file_name(input_string):
     return hash_string
 
 if __name__ == "__main__":
-    # test data: s3://braingeneers/ephys/2024-01-05-e-uploader-test/original/data/test_0.raw.h5 
-    # test parameter: s3://braingeneers/services/mqtt_job_listener/params/curation/params_1.json
-
-    # Set up argument parsing
+    # Define argument parsing
     parser = argparse.ArgumentParser(description="Run curation script with optional parameters.")
-    parser.add_argument("data_path", type=str, help="S3 path to the data file.")
+    parser.add_argument("uuid_path", type=str, help="S3 path to the UUID directory.")
     parser.add_argument("param_path", type=str, nargs="?", default=None, help="Optional S3 path to the parameter file.")
-    
-    # Parse arguments
+    parser.add_argument("--select_files", type=str, nargs="*", help="Optional list of specific files to process.")
+
     args = parser.parse_args()
-    data_path = args.data_path
+    uuid_path = args.uuid_path
     param_path = args.param_path
+    select_files = args.select_files  # Optional selection of specific files to process
+
+    # Parse UUID and get matched pairs of data and phy files
+    metadata_path, matched_pairs = parse_uuid(uuid_path=uuid_path)
     
-    # Use param_path or fall back to default
-    params_file_name = param_path.split("/")[-1].split(".")[0] if param_path else "params_default"
+    # Filter matched_pairs if select_files is specified
+    if select_files:
+        matched_pairs = {k: v for k, v in matched_pairs.items() if k in select_files}
 
-    s3_base_path, experiment, metadata_path, phy_path = parse_uuid(data_path=data_path)
-    print(f"s3 path: {data_path}")  # original recording s3 full path
-    print(f"s3 base: {s3_base_path}")
-    print(f"metadata path: {metadata_path}")
-    print(f"phy path: {phy_path}")
-    print(f"parameter file path: {param_path}")
+    # Download and process each matched pair
+    for base_name, (data_path, phy_path) in matched_pairs.items():
+        print(f"Processing data file: {data_path} with phy file: {phy_path}")
 
+        # Set up parameter filename
+        params_file_name = param_path.split("/")[-1].split(".")[0] if param_path else "params_default"
 
-    # Setup paths for download and extraction
-    current_folder = os.getcwd()
-    base_folder = os.path.join(current_folder, "data")
-    os.makedirs(base_folder, exist_ok=True)
-    extract_dir = os.path.join(base_folder, "kilosort_result")
-    kilosort_local_path = os.path.join(base_folder, "kilosort_result.zip")
-    metadata_local_path = os.path.join(base_folder, "metadata.json")
+        # Setup paths for download and extraction
+        current_folder = os.getcwd()
+        base_folder = os.path.join(current_folder, "data", base_name)
+        os.makedirs(base_folder, exist_ok=True)
+        extract_dir = os.path.join(base_folder, "kilosort_result")
+        kilosort_local_path = os.path.join(base_folder, "kilosort_result.zip")
+        metadata_local_path = os.path.join(base_folder, "metadata.json")
 
-
-###remove, gives annoying errors
-    #for p in [phy_path, data_path, param_path]:
-    #    try:
-    #        assert wr.does_object_exist(p)
-    #    except AssertionError as err:
-    #        logging.exception(f"File doesn't exist on S3! {p}")
-    #        logging.info("Program exited")
-    #        raise err
-    
-    # download metadata
-    if wr.does_object_exist(metadata_path):
-        logging.info("Start downloading metadata ...")
-        wr.download(metadata_path, metadata_local_path)
-        logging.info("Done!")
-        with open(metadata_local_path, "r") as f:
-            metadata = json.load(f)
-            if (experiment in metadata["ephys_experiments"]) and \
-                    ("data_format" in metadata["ephys_experiments"][experiment]):
-                data_format = metadata["ephys_experiments"][experiment]["data_format"]
-                logging.info(f"Read data format from metadata.json, format is {data_format}")
-            else:
-                data_format = "Maxwell"  # a patch for the old metadata.json
-                logging.info(f"Data format not found in metadata.json, default to Maxwell")
-    else:
-        logging.info("Metadata file not found. Skip downloading metadata.")
-        logging.info("Data format default to Maxwell")
-        data_format = "Maxwell"
-
-    # download phy.zip
-    logging.info("Start downloading kilosort result ...")
-    wr.download(phy_path, kilosort_local_path)
-    logging.info("Done!")
-    shutil.unpack_archive(kilosort_local_path, extract_dir, "zip")
-
-    # Define and create shared directory path
-    nwb_s3_path = f"{s3_base_path}/shared/{experiment}.nwb"
-    raw_data_local_path = posixpath.join(base_folder, "shared", f"{experiment}.nwb")
-    os.makedirs(os.path.join(base_folder, "shared"), exist_ok=True)  # Ensure directory exists
-
-    # Download the NWB file for raw data
-    logging.info(f"Start downloading raw data from {nwb_s3_path} ...")
-    wr.download(nwb_s3_path, raw_data_local_path)
-    logging.info("Raw data download complete!")
-
-
-
-    ## download raw data (getting rid of this for now)
-    ##come back and debug if need to recurate for different files
-    #logging.info("Start downloading raw data ...")
-    #experiment = "rec"
-    #wr.download(data_path, posixpath.join(base_folder, experiment))
-    #logging.info("Done")
-
-
-    # download param file
-    # Download and load parameter file if param_path is provided
-    if param_path:
-        logging.info("Start downloading parameter file ...")
-        param_file = posixpath.join(base_folder, "params.json")
-        wr.download(param_path, param_file)
-        logging.info("Done")
-        with open(param_file, "r") as f:
-            params_dict = json.load(f)
-
-        if len(params_dict) > 0:
-            logging.info(f"Use parameters {params_dict} from file {param_path} for curation")
+        # Download metadata
+        if wr.does_object_exist(metadata_path):
+            logging.info("Start downloading metadata ...")
+            wr.download(metadata_path, metadata_local_path)
+            logging.info("Done!")
+            with open(metadata_local_path, "r") as f:
+                metadata = json.load(f)
+                if (base_name in metadata["ephys_experiments"]) and \
+                        ("data_format" in metadata["ephys_experiments"][base_name]):
+                    data_format = metadata["ephys_experiments"][base_name]["data_format"]
+                    logging.info(f"Read data format from metadata.json, format is {data_format}")
+                else:
+                    data_format = "Maxwell"
+                    logging.info("Data format not found in metadata.json, default to Maxwell")
         else:
+            logging.info("Metadata file not found. Default to Maxwell format.")
+            data_format = "Maxwell"
+
+        # Download and extract kilosort result
+        logging.info("Start downloading kilosort result ...")
+        wr.download(phy_path, kilosort_local_path)
+        logging.info("Done!")
+        shutil.unpack_archive(kilosort_local_path, extract_dir, "zip")
+
+        # Define and create shared directory path
+        raw_data_local_path = posixpath.join(base_folder, f"{base_name}.nwb")
+        nwb_s3_path = f"{uuid_path.rstrip('/')}/shared/{base_name}.nwb"
+        os.makedirs(os.path.join(base_folder, "shared"), exist_ok=True)
+
+        # Download the NWB file for raw data
+        logging.info(f"Start downloading raw data from {nwb_s3_path} ...")
+        wr.download(nwb_s3_path, raw_data_local_path)
+        logging.info("Raw data download complete!")
+
+        # Download and load parameter file if param_path is provided
+        if param_path:
+            logging.info("Start downloading parameter file ...")
+            param_file = posixpath.join(base_folder, "params.json")
+            wr.download(param_path, param_file)
+            logging.info("Done")
+            with open(param_file, "r") as f:
+                params_dict = json.load(f)
+
+            if len(params_dict) > 0:
+                logging.info(f"Using parameters {params_dict} from file {param_path} for curation")
+            else:
+                params_dict = DEFUALT_PARAMS
+                params_file_name = "params_default"
+                logging.info(f"User parameters not available. Using default parameters {DEFUALT_PARAMS} for curation")
+        else:
+            # Fallback to default parameters if no param_path is provided
             params_dict = DEFUALT_PARAMS
             params_file_name = "params_default"
-            logging.info(f"User parameters not available. Using default parameters {DEFUALT_PARAMS} for curation")
-    else:
-        # Fallback to default parameters if no param_path is provided
-        params_dict = DEFUALT_PARAMS
-        params_file_name = "params_default"
-        logging.info(f"No parameter file provided. Using default parameters: {params_dict}")
+            logging.info(f"No parameter file provided. Using default parameters: {params_dict}")
 
+        # Run curation for this file pair
+        curation = QualityMetrics(
+            base_folder=base_folder,
+            rec_path=raw_data_local_path,
+            phy_folder=extract_dir,
+            data_format=data_format,
+            params_dict=params_dict
+        )
+        qm_file, wf_file = curation.package_cleaned()
 
-    # do curation
-    curation = QualityMetrics(base_folder=base_folder, 
-                              rec_path=raw_data_local_path, 
-                              phy_folder=extract_dir,
-                              data_format=data_format, 
-                              params_dict=params_dict)
-    qm_file, wf_file = curation.package_cleaned()
+        # Upload results
+        upload_file(phy_path, qm_file, params_file_name, file_type="qm")
+        #upload_file(phy_path, wf_file, params_file_name, file_type="wf")
 
-    # curated_file = experiment + "_qm.zip"
-    # waveform_file = experiment + "_wf.zip"
-    upload_file(phy_path, qm_file, params_file_name, file_type="qm")
-    upload_file(phy_path, wf_file, params_file_name, file_type="wf")
-    # upload_file(uuid, wf_file, waveform_file)
+    # Log unmatched files
+    unmatched_files = set(select_files or matched_pairs.keys()) - set(matched_pairs.keys())
+    if unmatched_files:
+        logging.info("Some selected files did not have matching *_phy.zip files:")
+        for file_name in unmatched_files:
+            logging.info(f"- {file_name}")

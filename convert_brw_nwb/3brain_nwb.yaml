@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: biocam-converter
+  name: biocam-converter2
 spec:
   backoffLimit: 2
   template:
@@ -15,17 +15,17 @@ spec:
           # GPU Run
           requests:
             cpu: "4"
-            memory: "32Gi"
-            ephemeral-storage: "50Gi"
+            memory: "200Gi"
+            ephemeral-storage: "250Gi"
           limits:
             cpu: "4"
-            memory: "32Gi"
-            ephemeral-storage: "50Gi"
+            memory: "200Gi"
+            ephemeral-storage: "250Gi"
 
         command: ["stdbuf", "-i0", "-o0", "-e0", "/usr/bin/time", "-v", "python", "convert_brw_nwb.py"]
         args:
-          - s3://braingeneersdev/amorson/00_AccuraV23D_CorticalOrganoidDAY180_Basal_NoiseBlanking/original/data/00_AccuraV23D_CorticalOrganoidDAY180_Basal_NoiseBlanking.bxr
-          - s3://braingeneersdev/amorson/00_AccuraV23D_CorticalOrganoidDAY180_Basal_NoiseBlanking/derived/kilosort2/00_AccuraV23D_CorticalOrganoidDAY180_Basal_NoiseBlanking.nwb
+          - s3://braingeneers/ephys/2024-10-29-e-3Brain_SmitsMidbrain/original/data/10-29-24_SmitsMidbrainD46_GABAzine_01.brw
+          - s3://braingeneers/ephys/2024-10-29-e-3Brain_SmitsMidbrain/shared/10-29-24_SmitsMidbrainD46_GABAzine_01.nwb
         env:
           - name: "PYTHONUNBUFFERED"
             value: "true"
@@ -42,6 +42,8 @@ spec:
           - name: "prp-s3-credentials"
             mountPath: "/root/.aws/credentials"
             subPath: "credentials"
+          - name: ephemeral
+            mountPath: "/tmp"
 
       restartPolicy: Never
       volumes:

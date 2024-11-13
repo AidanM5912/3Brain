@@ -2,6 +2,7 @@ import sys
 import h5py
 import json
 import argparse
+from memory_profiler import profile
 from dateutil import parser as dateutil_parser  # Rename to avoid conflict
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo  # Used for setting the PST timezone
@@ -49,6 +50,7 @@ def extract_metadata(file, file_path):
     print(f"Extracted metadata: {metadata}")
     return metadata
 
+
 def convert_brw_to_nwb(input_file, output_file):
     print(f"Starting conversion from {input_file} to {output_file}")
 
@@ -75,8 +77,7 @@ def convert_brw_to_nwb(input_file, output_file):
 
     print(f'Converted {input_file} to {output_file} using Neuroconv')
 
-
-if __name__ == '__main__':
+def main():
     print("Starting script...")
     parser = argparse.ArgumentParser(description='Convert BRW data to NWB format.')
     parser.add_argument('input_file', type=str, help='S3 URI for the input .brw file')
@@ -102,3 +103,6 @@ if __name__ == '__main__':
     wr.upload(local_output, output_s3)
 
     print("Conversion complete and file uploaded to S3.")
+
+if __name__ == '__main__':
+    main()

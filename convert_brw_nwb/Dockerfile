@@ -8,10 +8,11 @@ RUN pip install h5py \
 neuroconv \ 
 spikeinterface \ 
 braingeneers \
-python-dateutil
+python-dateutil \ 
+memory-profiler
 
 #PRP setup
 ENV ENDPOINT_URL="https://s3.braingeneers.gi.ucsc.edu"
 
-COPY . /app
-WORKDIR /app
+COPY . /src
+WORKDIR /src

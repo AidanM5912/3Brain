@@ -1,31 +1,31 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: curation-horg-midbrain-d34-acute
+  name: curation-11-07-smitsmidbrain-all
 spec:
   backoffLimit: 2
   template:
     spec:
       containers:
       - name: curation
-        image: aidanmorson/curation:v1
+        image: aidanmorson/curation:v2
         imagePullPolicy: Always
         resources:
 
           # GPU Run
           requests:
             cpu: "4"
-            memory: "64Gi"
-            ephemeral-storage: "100Gi"
+            memory: "75Gi"
+            ephemeral-storage: "400Gi"
           limits:
             cpu: "4"
-            memory: "64Gi"
-            ephemeral-storage: "100Gi"
+            memory: "75Gi"
+            ephemeral-storage: "400Gi"
 
         command: ["stdbuf", "-i0", "-o0", "-e0", "/usr/bin/time", "-v", "python", "si_curation.py"]
         args:
-          - s3://braingeneers/ephys/2024-10-17-e-hOrgMidbrainD34_ACUTE/original/data
-
+          - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/
+          - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/params_midbrain_maxwell.json
         env:
           - name: "PYTHONUNBUFFERED"
             value: "true"
