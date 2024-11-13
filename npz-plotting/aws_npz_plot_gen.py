@@ -688,7 +688,7 @@ class SpikeDataAnalysis:
                     neuron_y.append(y)
                     sttc_marker_size.append(sttc_sums[j])
 
-            legend_rates = np.percentile([sttc_sums > 0], [50, 75, 90, 98])
+            legend_rates = np.percentile(sttc_sums, [50, 75, 90, 98])
 
             plt.figure(figsize=(11, 9))
             plt.scatter(neuron_x, neuron_y, s=sttc_marker_size * 100, alpha=0.4, c='b', edgecolors='none')
