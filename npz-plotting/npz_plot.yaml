@@ -24,10 +24,10 @@ spec:
 
         command: ["stdbuf", "-i0", "-o0", "-e0", "/usr/bin/time", "-v", "python", "aws_npz_plot_gen.py"]
         args:
-          - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/derived/kilosort2/24432_SmitsMO_D55_sect300_T2PostDrug150-24hr_20241107_acqm.zip
-          - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/derived/kilosort2/24481_SmitsMO_D55_sect300_Control-24hr_20241107_acqm.zip
-          - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/derived/kilosort2/24578_SmitsMO_D55_sect300_T2PostDrug175-24hr_20241107_acqm.zip
-          - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/derived/kilosort2/
+          - s3://braingeneers/ephys/2024-11-12-e-SmitsMidbrain-DIV6/derived/kilosort2/
+          - s3://braingeneers/ephys/2024-11-12-e-SmitsMidbrain-DIV6/derived/kilosort2/
+          - s3://braingeneers/ephys/2024-11-12-e-SmitsMidbrain-DIV6/derived/kilosort2/
+          - s3://braingeneers/ephys/2024-11-12-e-SmitsMidbrain-DIV6/derived/kilosort2/
         env:
           - name: "PYTHONUNBUFFERED"
             value: "true"

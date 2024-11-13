@@ -153,7 +153,7 @@ class SpikeDataAnalysis:
             plt.xlabel(r"Horizontal Position ($\mu$m)")
             plt.ylabel(r"Vertical Position ($\mu$m)")
             plt.title(f"Footprint Plot with Firing Rates: {dataset_name}")
-            plt.savefig(os.path.join(output_path, f"footprint_plot_{dataset_name}.png"))
+            plt.savefig(os.path.join(output_path, f"footprint_plot_fr_{dataset_name}.png"))
             plt.close()
 
     def get_population_fr(self, train, bin_size=0.1, w=5):
@@ -670,6 +670,39 @@ class SpikeDataAnalysis:
             plt.tight_layout()
             plt.savefig(os.path.join(output_path, f"sttc_over_time_{dataset_name}.png"))
             plt.close()
+    
+    def plot_footprint_sttc(self, output_path, dataset_name):
+        plt.close('all')
+        for i, (train, neuron_data) in enumerate(zip(self.trains, self.neuron_data_list)):
+
+            neuron_x, neuron_y, sttc_marker_size = [], [], []
+
+            sttc_matrix = self.compute_sttc_matrix(train, self.durations[i])
+
+            sttc_sums = np.sum(sttc_matrix[i])-1 #sum an indiviudal neurons sttc values minus the interaction with itself
+
+            for j, neuron in enumerate(neuron_data.values()):
+                x, y = neuron['position']
+                if (x, y) != (0, 0):  # exclude the calibration electrode
+                    neuron_x.append(x)
+                    neuron_y.append(y)
+                    sttc_marker_size.append(sttc_sums[j])
+
+            legend_rates = np.percentile([sttc_sums > 0], [50, 75, 90, 98])
+
+            plt.figure(figsize=(11, 9))
+            plt.scatter(neuron_x, neuron_y, s=sttc_marker_size * 100, alpha=0.4, c='b', edgecolors='none')
+        
+            for rate in legend_rates:
+                plt.scatter([], [], s=rate * 100, c='r', alpha=0.4, label=f'STTC Sum {rate /100:.2f}')
+
+            plt.legend(scatterpoints=1, frameon=True, labelspacing=1.4, handletextpad=0.8, borderpad=0.92, title='STTC Sum', loc = 'best', title_fontsize=10, fontsize=10)
+            plt.xlabel(r"Horizontal Position ($\mu$m)")
+            plt.ylabel(r"Vertical Position ($\mu$m)")
+            plt.title(f"Footprint Plot with STTC Sum : {dataset_name}")
+            plt.savefig(os.path.join(output_path, f"footprint_plot_sttc_sum_{dataset_name}.png"))
+            plt.close()
+
 
 
     def run_all_analyses(self, output_folder, base_names, cleanup=True):
@@ -708,6 +741,7 @@ class SpikeDataAnalysis:
             self.plot_active_units_per_electrode(dataset_dir, dataset_name)
             self.plot_electrode_activity_heatmap(dataset_dir, dataset_name)
             self.plot_sttc_over_time(dataset_dir, dataset_name)
+            self.plot_footprint_sttc(dataset_dir, dataset_name)
 
             gc.collect()
 
