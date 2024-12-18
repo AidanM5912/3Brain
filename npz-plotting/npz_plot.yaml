@@ -8,26 +8,28 @@ spec:
     spec:
       containers:
       - name: npz-plots
-        image: aidanmorson/npz-plotting:v1
+        image: aidanmorson/npz-plotting:v2
         imagePullPolicy: Always
         resources:
 
           # GPU Run
           requests:
             cpu: "4"
-            memory: "32Gi"
-            ephemeral-storage: "50Gi"
+            memory: "200Gi"
+            ephemeral-storage: "250Gi"
           limits:
             cpu: "4"
-            memory: "32Gi"
-            ephemeral-storage: "50Gi"
+            memory: "200Gi"
+            ephemeral-storage: "250Gi"
 
         command: ["stdbuf", "-i0", "-o0", "-e0", "/usr/bin/time", "-v", "python", "aws_npz_plot_gen.py"]
         args:
-          - s3://braingeneers/ephys/2024-11-12-e-SmitsMidbrain-DIV6/derived/kilosort2/
-          - s3://braingeneers/ephys/2024-11-12-e-SmitsMidbrain-DIV6/derived/kilosort2/
-          - s3://braingeneers/ephys/2024-11-12-e-SmitsMidbrain-DIV6/derived/kilosort2/
-          - s3://braingeneers/ephys/2024-11-12-e-SmitsMidbrain-DIV6/derived/kilosort2/
+          - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/derived/kilosort2/24432_SmitsMO_D55_sect300_T2PostDrug150-24hr_20241107_acqm.zip
+          - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/derived/kilosort2/24481_SmitsMO_D55_sect300_Control-24hr_20241107_acqm.zip
+          - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/derived/kilosort2/24578_SmitsMO_D55_sect300_T2PostDrug175-24hr_20241107_acqm.zip
+          - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/derived/kilosort2/
+          - --pca
+          - --cleanup
         env:
           - name: "PYTHONUNBUFFERED"
             value: "true"

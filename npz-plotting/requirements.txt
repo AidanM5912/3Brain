@@ -1,3 +1,5 @@
 braingeneers[utils]
 numpy
 matplotlib
+scikit-learn>=0.24.0
+scipy
