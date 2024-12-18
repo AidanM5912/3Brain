@@ -14,13 +14,13 @@ spec:
 
           # GPU Run
           requests:
-            cpu: "4"
-            memory: "200Gi"
-            ephemeral-storage: "250Gi"
+            cpu: "8"
+            memory: "64Gi"
+            ephemeral-storage: "100Gi"
           limits:
-            cpu: "4"
-            memory: "200Gi"
-            ephemeral-storage: "250Gi"
+            cpu: "12"
+            memory: "100Gi"
+            ephemeral-storage: "150Gi"
 
         command: ["stdbuf", "-i0", "-o0", "-e0", "/usr/bin/time", "-v", "python", "aws_npz_plot_gen.py"]
         args:

@@ -483,44 +483,6 @@ class SpikeDataAnalysis:
         plt.savefig(os.path.join(output_path, f"sttc_violin_plot_across_recordings.png"))
         plt.close()
 
-    def plot_inter_burst_interval_distribution(self, output_path, dataset_name):
-        plt.close('all')
-        for i, train in enumerate(self.trains):
-            burst_intervals = []
-            for neuron_spikes in train:
-                burst_intervals.extend(np.diff(neuron_spikes))  # calculate intervals between bursts
-
-            plt.figure(figsize=(12, 6))
-            plt.hist(burst_intervals, bins=50, color='blue', alpha=0.7)
-            plt.xlabel('Inter-Burst Interval (s)')
-            plt.ylabel('Count')
-            plt.title(f'Inter-Burst Interval Distribution: {dataset_name}')
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_path, f"inter_burst_interval_distribution_{dataset_name}.png"))
-            plt.close()
-
-    def plot_burst_frequency_duration(self, output_path, dataset_name):
-        plt.close('all')
-        for i, train in enumerate(self.trains):
-            burst_frequencies = []
-            burst_durations = []
-
-            for neuron_spikes in train:
-                intervals = np.diff(neuron_spikes)
-                if intervals.size > 0:
-                    burst_frequencies.append(1 / np.mean(intervals))  # frequency as the inverse of the mean interval
-                    burst_durations.append(np.sum(intervals))        # total duration of bursts
-
-            plt.figure(figsize=(12, 6))
-            plt.scatter(burst_frequencies, burst_durations, alpha=0.6)
-            plt.xlabel('Burst Frequency (Hz)')
-            plt.ylabel('Burst Duration (s)')
-            plt.title(f'Burst Frequency vs. Duration: {dataset_name}')
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_path, f"burst_frequency_duration_{dataset_name}.png"))
-            plt.close()
-
-
     def plot_firing_rate_histogram(self, output_path, dataset_name):
         plt.close('all')
         for i, firing_rates in enumerate(self.firing_rates_list):
@@ -1052,10 +1014,13 @@ class SpikeDataAnalysis:
                     ax.set_title(f"Raster Plot ({window_size}s) - High Activity: {dataset_name}")
 
                     #redefined a plot_filename for debugging. try to use this in future
+                    raster_output_dir = os.path.join(output_path, f"rasters/high_activity_raster/{window_size}s")
+                    os.makedirs(raster_output_dir, exist_ok=True)
                     plot_filename = os.path.join(raster_output_dir, f"raster_{dataset_name}_window_{window_size}s_{int(center_time)}s.png")
                     plt.tight_layout()
                     plt.savefig(plot_filename)
                     plt.close(fig)
+
 
     def plot_comparison_firing_rate_histogram(self, output_path, base_names, bins=50):
         """
@@ -1428,6 +1393,93 @@ class SpikeDataAnalysis:
         plt.savefig(os.path.join(output_path, "continuous_pca_scree_plot.png"))
         plt.close()
 
+    def analyze_burst_characteristics(self, output_path, dataset_names):
+        """
+        Analyze and compare burst characteristics (inter-burst intervals, burst frequencies, durations, and neuron participation) across datasets.
+
+        Parameters:
+            output_path (str): Directory to save the analysis outputs.
+            dataset_names (list): Names of the datasets being compared.
+
+        Saves:
+            Comparison plots for burst characteristics in the comparison directory.
+        """
+        # Use the pre-existing comparison directory
+        comparison_dir = os.path.join(output_path, "comparisons", "burst_characteristics")
+        os.makedirs(comparison_dir, exist_ok=True)
+
+        # Initialize storage for comparisons across datasets
+        all_burst_intervals = []
+        all_burst_frequencies = []
+        all_burst_durations = []
+        all_neuron_participation = []
+
+        for i, train in enumerate(self.trains):
+            burst_intervals = []
+            burst_frequencies = []
+            burst_durations = []
+            neuron_participation = []
+
+            for neuron_spikes in train:
+                intervals = np.diff(neuron_spikes)
+
+                # Inter-burst intervals
+                if intervals.size > 0:
+                    burst_intervals.extend(intervals)
+
+                    # Burst frequency (inverse of the mean interval)
+                    burst_frequencies.append(1 / np.mean(intervals))
+
+                    # Burst duration (sum of intervals between spikes in a burst)
+                    burst_durations.append(np.sum(intervals))
+
+                # Neuron participation (count neurons with spikes in the burst window)
+                burst_spike_counts = np.histogram(neuron_spikes, bins=np.arange(0, max(neuron_spikes), 1))[0]
+                neuron_participation.append(np.count_nonzero(burst_spike_counts > 0))
+
+            all_burst_intervals.append(burst_intervals)
+            all_burst_frequencies.append(burst_frequencies)
+            all_burst_durations.append(burst_durations)
+            all_neuron_participation.append(neuron_participation)
+
+        # Comparison Plots
+        # Inter-Burst Interval Comparison
+        plt.figure(figsize=(12, 6))
+        for i, burst_intervals in enumerate(all_burst_intervals):
+            plt.hist(burst_intervals, bins=50, alpha=0.5, label=dataset_names[i], density=True)
+        plt.xlabel('Inter-Burst Interval (s)')
+        plt.ylabel('Density')
+        plt.title('Comparison: Inter-Burst Interval Across Datasets')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(comparison_dir, "comparison_inter_burst_interval.png"))
+        plt.close()
+
+        # Burst Frequency vs. Duration Comparison
+        plt.figure(figsize=(12, 6))
+        for i, (burst_frequencies, burst_durations) in enumerate(zip(all_burst_frequencies, all_burst_durations)):
+            plt.scatter(burst_frequencies, burst_durations, alpha=0.6, label=dataset_names[i])
+        plt.xlabel('Burst Frequency (Hz)')
+        plt.ylabel('Burst Duration (s)')
+        plt.title('Comparison: Burst Frequency vs. Duration Across Datasets')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(comparison_dir, "comparison_burst_freq_duration.png"))
+        plt.close()
+
+        # Neuron Participation Comparison
+        plt.figure(figsize=(12, 6))
+        for i, neuron_participation in enumerate(all_neuron_participation):
+            plt.hist(neuron_participation, bins=50, alpha=0.5, label=dataset_names[i], density=True)
+        plt.xlabel('Neuron Participation Count')
+        plt.ylabel('Density')
+        plt.title('Comparison: Neuron Participation Across Datasets')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(comparison_dir, "comparison_neuron_participation.png"))
+        plt.close()
+
+
     
 
     def run_all_analyses(self, output_folder, base_names, perform_pca=False, cleanup=True):
@@ -1470,8 +1522,6 @@ class SpikeDataAnalysis:
             self.overlay_fr_raster(dataset_dir, dataset_name)
             self.plot_smoothed_population_fr(dataset_dir, dataset_name)
             self.sttc_plot(dataset_dir, dataset_name)
-            self.plot_inter_burst_interval_distribution(dataset_dir, dataset_name)
-            self.plot_burst_frequency_duration(dataset_dir, dataset_name)
             self.plot_firing_rate_histogram(dataset_dir, dataset_name)
             self.plot_firing_rate_cdf(dataset_dir, dataset_name)
             self.plot_isi_histogram(dataset_dir, dataset_name)
@@ -1498,6 +1548,8 @@ class SpikeDataAnalysis:
         self.plot_comparison_regular_isi(comparison_dir, base_names)
         self.plot_comparison_firing_rate_histogram(comparison_dir, base_names)
         self.plot_comparison_kde_pdf(comparison_dir, base_names)
+        self.analyze_burst_characteristics(comparison_dir, base_names)
+
 
 
 
