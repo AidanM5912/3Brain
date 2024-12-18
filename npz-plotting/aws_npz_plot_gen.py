@@ -220,8 +220,8 @@ class SpikeDataAnalysis:
     def compute_sttc_matrix(spike_train, length, delt=20):
 
         #handle this case
-        if not any(spike_train):
-            print("Warning: Spike train is empty. Returning zero-filled STTC matrix.")
+        if not any(len(ts) > 0 for ts in spike_train):
+            print("Warning: Spike train is empty or contains no spikes. Returning zero-filled STTC matrix.")
             return np.zeros((len(spike_train), len(spike_train)))
 
         def time_in_delt(tA, delt, tmax):

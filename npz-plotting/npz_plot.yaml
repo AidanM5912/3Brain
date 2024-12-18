@@ -14,9 +14,9 @@ spec:
 
           # GPU Run
           requests:
-            cpu: "8"
-            memory: "64Gi"
-            ephemeral-storage: "100Gi"
+            cpu: "12"
+            memory: "100Gi"
+            ephemeral-storage: "150Gi"
           limits:
             cpu: "12"
             memory: "100Gi"
