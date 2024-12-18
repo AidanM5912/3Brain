@@ -1012,7 +1012,7 @@ class SpikeDataAnalysis:
                 continue
             
             # identify high-activity periods
-            threshold = np.percentile(fr_avg, 90)
+            threshold = np.percentile(fr_avg, 95) #changed to 95 from 90 to decrease plots created
             high_activity_times = bins[np.where(fr_avg > threshold)]
 
             #error handling
