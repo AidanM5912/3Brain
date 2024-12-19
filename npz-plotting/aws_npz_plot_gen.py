@@ -8,6 +8,7 @@ import numpy as np
 import os
 import shutil
 import scipy.stats
+import scipy.ndimage
 import sklearn.decomposition
 import sys
 import tempfile
@@ -161,31 +162,42 @@ class SpikeDataAnalysis:
             plt.close()
 
     @staticmethod
-    def get_population_fr(train, bin_size=0.1, w=5):
+    def get_population_fr(train, bin_size=0.1, sigma=5, average=False):
+        from scipy.ndimage import gaussian_filter1d
         trains = np.hstack(train)
         rec_length = np.max(trains)
         bin_num = int(rec_length // bin_size) + 1
         bins = np.linspace(0, rec_length, bin_num)
         fr = np.histogram(trains, bins)[0] / bin_size
-        fr_avg = np.convolve(fr, np.ones(w), 'same') / w
-        return bins[1:], fr_avg
+
+
+        if average:
+            # normalize by number of neurons
+            num_neurons = len(train)  
+            fr_normalized = fr / num_neurons  # firing rate normalized to Hz/Neuron
+
+        # gaussian smoothing
+        fr_smoothed = gaussian_filter1d(fr_normalized, sigma=sigma)
+
+        return bins[1:], fr_smoothed  # bin centers and smoothed firing rate
+
 
     def plot_smoothed_population_fr(self, output_path, dataset_name):
         plt.close('all')
         for i, train in enumerate(self.trains):
 
-            bins, fr_avg = self.get_population_fr(train)
+            bins, fr_avg = self.get_population_fr(train, average=False)
 
             plt.figure(figsize=(12, 6))
             plt.plot(bins, fr_avg)
 
             plt.xlabel("Time (s)", fontsize=12)
-            plt.ylabel("Population Firing Rate (Hz)", fontsize=12)
+            plt.ylabel("Population Firing Rate (Hz)/Neuron", fontsize=12)
 
             plt.xlim(0, self.durations[i])
             plt.ylim(np.min(fr_avg) - 5, np.max(fr_avg) + 5)
 
-            plt.title(f"Smoothed Population Firing Rate: {dataset_name}", fontsize=16)
+            plt.title(f"Smoothed  Population Firing Rate: {dataset_name}", fontsize=16)
             plt.savefig(os.path.join(output_path, f"smoothed_population_fr_{dataset_name}.png"))
             plt.close()
 
@@ -193,7 +205,7 @@ class SpikeDataAnalysis:
         plt.close('all')
         for i, train in enumerate(self.trains):
 
-            bins, fr_avg = self.get_population_fr(train)
+            bins, fr_avg = self.get_population_fr(train, average=True)
 
             fig, axs = plt.subplots(1, 1, figsize=(16, 6))
             axs1 = axs.twinx()
@@ -207,7 +219,7 @@ class SpikeDataAnalysis:
 
             axs.set_xlabel("Time (s)", fontsize=14)
             axs.set_ylabel("Neuron Number", fontsize=14)
-            axs1.set_ylabel("Population Firing Rate (Hz)", fontsize=16, color='r')
+            axs1.set_ylabel("Normalized Population Firing Rate (Hz)", fontsize=16, color='r')
             axs1.spines['right'].set_color('r')
             axs1.spines['right'].set_linewidth(2)
             axs1.tick_params(axis='y', colors='r')
@@ -680,7 +692,7 @@ class SpikeDataAnalysis:
 
             sttc_matrix = self.compute_sttc_matrix(train, self.durations[i])
 
-            sttc_sums = np.sum(sttc_matrix[i])-1 #sum an indiviudal neurons sttc values minus the interaction with itself
+            sttc_sums = np.sum(sttc_matrix, axis=1) - np.diag(sttc_matrix) #calculate sums minus the self connection
 
             for j, neuron in enumerate(neuron_data.values()):
                 x, y = neuron['position']
@@ -966,7 +978,7 @@ class SpikeDataAnalysis:
         """
         for i, train in enumerate(self.trains):
             # calculate population firing rate
-            bins, fr_avg = self.get_population_fr(train)
+            bins, fr_avg = self.get_population_fr(train, average=True)
 
             #error handling
             if len(fr_avg) == 0 or np.all(fr_avg == 0):
@@ -1076,7 +1088,7 @@ class SpikeDataAnalysis:
             plt.title(f'STTC Heatmap (Log Scale): {dataset_name}')
             plt.tight_layout()
 
-            plot_name = os.path.join(output_path, f"sttc_log_{dataset_name}.png")
+            plot_name = os.path.join(output_path, f"sttc_log_{dataset_name}.png") #try to do this in the future, maybe easier to read
             plt.savefig(plot_name)
             plt.close()
 
@@ -1250,7 +1262,8 @@ class SpikeDataAnalysis:
             plt.title(f"Pairwise Linear Comparison: {metric.capitalize()} ({name_1} vs {name_2})")
             plt.legend()
             plt.tight_layout()
-            plt.savefig(os.path.join(pairwise_dir, f"{metric}_pairwise_{name_1}_vs_{name_2}.png"))
+            plot_filename = os.path.join(output_path, f"{metric}_pairwise_{name_1}_vs_{name_2}.png")
+            plt.savefig(plot_filename)
             plt.close()
 
     def plot_global_linear_comparison(self, output_path, base_names, metric):
@@ -1302,7 +1315,8 @@ class SpikeDataAnalysis:
         plt.title(f"Global Linear Comparison: {metric.capitalize()} Across All Conditions")
         plt.legend()
         plt.tight_layout()
-        plt.savefig(os.path.join(global_dir, f"{metric}_global_comparison.png"))
+        plot_filename = os.path.join(output_path, f"{metric}_global_comparison.png")
+        plt.savefig(plot_filename)
         plt.close()
 
     def calculate_continuous_pca(self, bin_size=0.1):
