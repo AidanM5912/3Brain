@@ -175,9 +175,10 @@ class SpikeDataAnalysis:
             # normalize by number of neurons
             num_neurons = len(train)  
             fr_normalized = fr / num_neurons  # firing rate normalized to Hz/Neuron
-
-        # gaussian smoothing
-        fr_smoothed = gaussian_filter1d(fr_normalized, sigma=sigma)
+        else:
+            fr_normalized = fr
+         
+        fr_smoothed = gaussian_filter1d(fr_normalized, sigma=sigma) #smoothing instead of average over bin
 
         return bins[1:], fr_smoothed  # bin centers and smoothed firing rate
 
