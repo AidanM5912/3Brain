@@ -286,16 +286,48 @@ class SpikeDataAnalysis:
         upper_triangle_indices = np.triu_indices_from(matrix, k=1)
         return matrix[upper_triangle_indices]
 
-    def compute_spike_triggered_sttc(self, train, duration, window_size=1.0):
-        spike_windows = []
-        for spike_times in train:
-            for spike in spike_times:
-                start_time = max(0, spike - window_size / 2)
-                end_time = min(duration, spike + window_size / 2)
-                windowed_train = [neuron_spikes[(neuron_spikes >= start_time) & (neuron_spikes <= end_time)] for neuron_spikes in train]
-                sttc_matrix = self.compute_sttc_matrix(windowed_train, duration)
-                spike_windows.append(sttc_matrix)
-        return spike_windows
+    def compute_spike_triggered_sttc(self, trains, duration, window_size=1.0):
+        """
+        Optimized spike-triggered STTC computation. For use in large datasets (NOT IMPLEMENTED YET)
+
+        Parameters:
+            trains (list of arrays): Spike trains, each array corresponds to a neuron's spike times.
+            duration (float): Duration of the recording in seconds.
+            window_size (float): Time window size for the STTC calculation.
+
+        Returns:
+            numpy.ndarray: Pairwise STTC matrix.
+        """
+        import scipy.spatial
+
+        num_neurons = len(trains)
+        sttc_matrix = np.zeros((num_neurons, num_neurons))
+        tau = window_size / duration  # Precompute tau as it is constant
+
+        # Precompute pairwise spike distances for all neuron pairs
+        for i in range(num_neurons):
+            train1 = trains[i]
+
+            for j in range(i + 1, num_neurons):  # Upper triangular matrix
+                train2 = trains[j]
+
+                # Efficient pairwise spike distance computation using KDTree
+                tree1 = scipy.spatial.cKDTree(train1[:, None])  # Build KDTree for fast lookups
+                tree2 = scipy.spatial.cKDTree(train2[:, None])
+
+                # Find neighbors within the window size for both trains
+                prop1 = len(tree1.query_ball_tree(tree2, r=window_size)) / len(train2)
+                prop2 = len(tree2.query_ball_tree(tree1, r=window_size)) / len(train1)
+
+                # Compute STTC
+                sttc = 0.5 * ((prop1 - tau) / (1 - tau) + (prop2 - tau) / (1 - tau))
+                sttc_matrix[i, j] = sttc
+                sttc_matrix[j, i] = sttc  # Symmetric
+
+        return sttc_matrix
+
+
+
 
     @staticmethod
     def group_neurons_by_firing_rate(firing_rates):
@@ -347,128 +379,136 @@ class SpikeDataAnalysis:
             plt.savefig(os.path.join(output_path, f"sttc_heatmap_{dataset_name}.png"))
             plt.close()
 
+    def sttc_violin_plot_by_firing_rate_individual(self, output_path, dataset_name):
+        #generate STTC violin plots for an individual dataset by firing rate.
 
-    def sttc_violin_plot_by_proximity(self, output_path, dataset_names, distance_threshold=100):
+        plt.close('all')
+
+        # Find the index of the dataset
+        for i, train in enumerate(self.trains):
+            dataset_name = dataset_name
+            groups = self.group_neurons_by_firing_rate(self.firing_rates_list[i])
+            sttc_values = []
+            labels = []
+
+            for group_name, indices in groups.items():
+                sttc_matrix = self.compute_sttc_matrix([train[j] for j in indices], self.durations[i])
+                sttc_values.append(self.get_upper_triangle_values(sttc_matrix))
+                labels.append(f"{group_name.capitalize()}")
+
+        # Generate the violin plot
+        plt.figure(figsize=(12, 8))
+        plt.violinplot(sttc_values, showmeans=True)
+        plt.xticks(ticks=np.arange(1, len(labels) + 1), labels=labels, rotation=45, ha='right')
+        plt.xlabel('Firing Rate Group')
+        plt.ylabel('STTC Values')
+        plt.title(f'Violin Plot of STTC Values by Firing Rate: {dataset_name}')
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_path, f"sttc_violin_plot_by_firing_rate_{dataset_name}.png"))
+        plt.close()
+
+    def sttc_violin_plot_by_firing_rate_compare(self, output_path, dataset_names):
+        #generate a combined STTC violin plot by firing rate across multiple datasets.
+
+        plt.close('all')
+
+        combined_sttc_values = []
+        combined_labels = []
+
+        for i, train in enumerate(self.trains):
+            dataset_name = dataset_names[i]
+            groups = self.group_neurons_by_firing_rate(self.firing_rates_list[i])
+
+            for group_name, indices in groups.items():
+                sttc_matrix = self.compute_sttc_matrix([train[j] for j in indices], self.durations[i])
+                combined_sttc_values.append(self.get_upper_triangle_values(sttc_matrix))
+                combined_labels.append(f"{dataset_name} - {group_name.capitalize()}")
+
+
+        # Generate the violin plot
+        plt.figure(figsize=(12, 8))
+        plt.violinplot(combined_sttc_values, showmeans=True)
+        plt.xticks(ticks=np.arange(1, len(combined_labels) + 1), labels=combined_labels, rotation=45, ha='right')
+        plt.xlabel('Firing Rate Group')
+        plt.ylabel('STTC Values')
+        plt.title('Violin Plot of STTC Values by Firing Rate Group Across Recordings')
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_path, f"sttc_violin_plot_by_firing_rate_combined.png"))
+        plt.close()
+
+    def sttc_violin_plot_by_proximity_individual(self, output_path, dataset_name, distance_threshold=100):
         """
-        Generate STTC violin plots by proximity.
+        Generate STTC violin plots for an individual dataset by proximity.
 
         Parameters:
             output_path (str): Directory to save plots.
-            dataset_names (list): Names of datasets.
+            dataset_name (str): Name of the dataset.
             distance_threshold (int): Threshold for proximity grouping.
         """
         plt.close('all')
 
-        # If the output path is a dataset-specific directory
-        if output_path not in [os.path.join(output_path, "comparisons")]:
-            for i, train in enumerate(self.trains):
-                dataset_name = dataset_names[i]
-                groups = self.group_neurons_by_proximity(self.neuron_data_list[i], distance_threshold)
-                sttc_values = []
-                labels = []
+        # Find the index of the dataset
+        for i, train in enumerate(self.trains):
+            dataset_name = dataset_name
+            neuron_data = self.neuron_data_list[i]
+            groups = self.group_neurons_by_proximity(neuron_data, distance_threshold)
+            sttc_values = []
+            labels = []
 
-                for group_name, indices in groups.items():
-                    if len(indices) < 2:
-                        continue
-                    sttc_matrix = self.compute_sttc_matrix([train[j] for j in indices], self.durations[i])
-                    sttc_values.append(self.get_upper_triangle_values(sttc_matrix))
-                    labels.append(f"{group_name.capitalize()}")
+            for group_name, indices in groups.items():
+                if len(indices) < 2:
+                    continue
+                sttc_matrix = self.compute_sttc_matrix([train[j] for j in indices], self.durations[i])
+                sttc_values.append(self.get_upper_triangle_values(sttc_matrix))
+                labels.append(f"{group_name.capitalize()}")
 
-                plt.figure(figsize=(12, 8))
-                plt.violinplot(sttc_values, showmeans=True)
-                plt.xticks(ticks=np.arange(1, len(labels) + 1), labels=labels, rotation=45, ha='right')
-                plt.xlabel('Proximity Group')
-                plt.ylabel('STTC Values')
-                plt.title(f'Violin Plot of STTC Values by Spatial Proximity: {dataset_name} (Threshold = {distance_threshold}μm)')
-                plt.tight_layout()
-                plt.savefig(os.path.join(output_path, f"sttc_violin_plot_by_proximity_{dataset_name}.png"))
-                plt.close()
+        # Generate the violin plot
+        plt.figure(figsize=(12, 8))
+        plt.violinplot(sttc_values, showmeans=True)
+        plt.xticks(ticks=np.arange(1, len(labels) + 1), labels=labels, rotation=45, ha='right')
+        plt.xlabel('Proximity Group')
+        plt.ylabel('STTC Values')
+        plt.title(f'Violin Plot of STTC Values by Spatial Proximity: {dataset_name} (Threshold = {distance_threshold}μm)')
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_path, f"sttc_violin_plot_by_proximity_{dataset_name}.png"))
+        plt.close()
 
-        # If the output path is the comparison directory
-        if output_path == os.path.join(output_path, "comparisons"):
-            combined_sttc_values = []
-            combined_labels = []
-
-            for i, train in enumerate(self.trains):
-                dataset_name = dataset_names[i]
-                groups = self.group_neurons_by_proximity(self.neuron_data_list[i], distance_threshold)
-
-                for group_name, indices in groups.items():
-                    if len(indices) < 2:
-                        continue
-                    sttc_matrix = self.compute_sttc_matrix([train[j] for j in indices], self.durations[i])
-                    combined_sttc_values.append(self.get_upper_triangle_values(sttc_matrix))
-                    combined_labels.append(f"{dataset_name} - {group_name.capitalize()}")
-
-            plt.figure(figsize=(12, 8))
-            plt.violinplot(combined_sttc_values, showmeans=True)
-            plt.xticks(ticks=np.arange(1, len(combined_labels) + 1), labels=combined_labels, rotation=45, ha='right')
-            plt.xlabel('Proximity Group')
-            plt.ylabel('STTC Values')
-            plt.title(f'Violin Plot of STTC Values by Spatial Proximity Across Recordings (Threshold = {distance_threshold}μm)')
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_path, f"sttc_violin_plot_by_proximity_combined.png"))
-            plt.close()
-
-
-    def sttc_violin_plot_by_firing_rate(self, output_path, dataset_names):
+    def sttc_violin_plot_by_proximity_compare(self, output_path, dataset_names, distance_threshold=100):
         """
-        Generate STTC violin plots by firing rate.
+        Generate a combined STTC violin plot by proximity across multiple datasets.
 
         Parameters:
             output_path (str): Directory to save plots.
-            dataset_names (list): Names of datasets.
+            dataset_names (list): Names of datasets for comparison.
+            distance_threshold (int): Threshold for proximity grouping.
         """
         plt.close('all')
 
-        # If the output path is a dataset-specific directory
-        if output_path not in [os.path.join(output_path, "comparisons")]:
-            for i, train in enumerate(self.trains):
-                dataset_name = dataset_names[i]
-                groups = self.group_neurons_by_firing_rate(self.firing_rates_list[i])
-                sttc_values = []
-                labels = []
+        combined_sttc_values = []
+        combined_labels = []
 
-                for group_name, indices in groups.items():
-                    sttc_matrix = self.compute_sttc_matrix([train[j] for j in indices], self.durations[i])
-                    sttc_values.append(self.get_upper_triangle_values(sttc_matrix))
-                    labels.append(f"{group_name.capitalize()}")
+        for i, train in enumerate(self.trains):
+            dataset_name = dataset_names[i]
+            neuron_data = self.neuron_data_list[i]
+            groups = self.group_neurons_by_proximity(neuron_data, distance_threshold)
 
-                plt.figure(figsize=(12, 8))
-                plt.violinplot(sttc_values, showmeans=True)
-                plt.xticks(ticks=np.arange(1, len(labels) + 1), labels=labels, rotation=45, ha='right')
-                plt.xlabel('Firing Rate Group')
-                plt.ylabel('STTC Values')
-                plt.title(f'Violin Plot of STTC Values by Firing Rate: {dataset_name}')
-                plt.tight_layout()
-                plt.savefig(os.path.join(output_path, f"sttc_violin_plot_by_firing_rate_{dataset_name}.png"))
-                plt.close()
+            for group_name, indices in groups.items():
+                if len(indices) < 2:
+                    continue
+                sttc_matrix = self.compute_sttc_matrix([train[j] for j in indices], self.durations[i])
+                combined_sttc_values.append(self.get_upper_triangle_values(sttc_matrix))
+                combined_labels.append(f"{dataset_name} - {group_name.capitalize()}")
 
-        # If the output path is the comparison directory
-        if output_path == os.path.join(output_path, "comparisons"):
-            combined_sttc_values = []
-            combined_labels = []
-
-            for i, train in enumerate(self.trains):
-                dataset_name = dataset_names[i]
-                groups = self.group_neurons_by_firing_rate(self.firing_rates_list[i])
-
-                for group_name, indices in groups.items():
-                    sttc_matrix = self.compute_sttc_matrix([train[j] for j in indices], self.durations[i])
-                    combined_sttc_values.append(self.get_upper_triangle_values(sttc_matrix))
-                    combined_labels.append(f"{dataset_name} - {group_name.capitalize()}")
-
-            plt.figure(figsize=(12, 8))
-            plt.violinplot(combined_sttc_values, showmeans=True)
-            plt.xticks(ticks=np.arange(1, len(combined_labels) + 1), labels=combined_labels, rotation=45, ha='right')
-            plt.xlabel('Firing Rate Group')
-            plt.ylabel('STTC Values')
-            plt.title('Violin Plot of STTC Values by Firing Rate Group Across Recordings')
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_path, f"sttc_violin_plot_by_firing_rate_combined.png"))
-            plt.close()
-
-
+        # Generate the violin plot
+        plt.figure(figsize=(12, 8))
+        plt.violinplot(combined_sttc_values, showmeans=True)
+        plt.xticks(ticks=np.arange(1, len(combined_labels) + 1), labels=combined_labels, rotation=45, ha='right')
+        plt.xlabel('Proximity Group')
+        plt.ylabel('STTC Values')
+        plt.title(f'Violin Plot of STTC Values by Spatial Proximity Across Recordings (Threshold = {distance_threshold}μm)')
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_path, f"sttc_violin_plot_by_proximity_combined.png"))
+        plt.close()
 
 
     def sttc_violin_plot_across_recordings(self, output_path, dataset_names):
@@ -523,37 +563,116 @@ class SpikeDataAnalysis:
             plt.savefig(os.path.join(output_path, f"firing_rate_cdf_{dataset_name}.png"))
             plt.close()
 
-    def plot_isi_histogram(self, output_path, dataset_name):
+    def plot_isi_histogram(self, output_path, dataset_name, bins=50, log_scale=False, xlim=None, kde=False):
+        """
+        Plot the ISI histogram for a dataset with enhancements.
+
+        Parameters:
+            output_path (str): Directory to save the plot.
+            dataset_name (str): Name of the dataset.
+            bins (int or array): Number of bins or bin edges for the histogram.
+            log_scale (bool): If True, use a logarithmic x-axis.
+            xlim (tuple): Limits for the x-axis (e.g., (0, 8) to focus on short ISIs).
+            kde (bool): If True, overlay a Kernel Density Estimation (KDE).
+        """
         plt.close('all')
+
         for i, train in enumerate(self.trains):
+            # Collect all ISI values
             all_intervals = []
             for neuron_spikes in train:
                 all_intervals.extend(np.diff(neuron_spikes))
 
+            # Filter ISI values based on xlim
+            if xlim:
+                all_intervals = [isi for isi in all_intervals if xlim[0] <= isi <= xlim[1]]
+
+            # Create histogram
             plt.figure(figsize=(12, 6))
-            plt.hist(all_intervals, bins=50, color='cyan', alpha=0.7)
+            if log_scale:
+                # Use logarithmic bins if log_scale is True
+                bins = np.logspace(np.log10(min(all_intervals) + 1e-6), np.log10(max(all_intervals)), bins)
+                plt.xscale('log')
+            else:
+                # Use linear bins (adjusted to xlim if specified)
+                bins = np.linspace(xlim[0], xlim[1], bins) if xlim else bins
+
+            plt.hist(all_intervals, bins=bins, color='red', alpha=0.7, label='Histogram')
+
+            # Add KDE if enabled
+            if kde:
+                from scipy.stats import gaussian_kde
+                density = gaussian_kde(all_intervals)
+                xs = np.linspace(min(all_intervals), max(all_intervals), 500)
+                plt.plot(xs, density(xs), color='blue', label='KDE')
+
+            # Set x-axis limits
+            if xlim:
+                plt.xlim(xlim)  # Explicitly set the x-axis range
+
+            # Labels and title
             plt.xlabel('Inter-Spike Interval (s)')
             plt.ylabel('Count')
             plt.title(f'ISI Histogram: {dataset_name}')
+            plt.legend()
             plt.tight_layout()
-            plt.savefig(os.path.join(output_path, f"isi_histogram_{dataset_name}.png"))
+
+            # Save the plot
+            plt.savefig(os.path.join(output_path, f"isi_histogram_{dataset_name}_log_{log_scale}.png"))
             plt.close()
 
-    def plot_cv_of_isi(self, output_path, dataset_name):
+
+
+    def plot_cv_of_isi(self, output_path, dataset_name, bins=50, xlim=None, kde=False):
+        """
+        Plot the histogram of the Coefficient of Variation (CV) of ISI values.
+
+        Parameters:
+            output_path (str): Directory to save the plot.
+            dataset_name (str): Name of the dataset.
+            bins (int or array): Number of bins or bin edges for the histogram.
+            xlim (tuple): Limits for the x-axis (e.g., (0, 2) to focus on low CV values).
+            kde (bool): If True, overlay a Kernel Density Estimation (KDE).
+        """
         plt.close('all')
+
         for i, train in enumerate(self.trains):
+            # Calculate CV values
             cv_values = []
             for neuron_spikes in train:
                 intervals = np.diff(neuron_spikes)
                 if len(intervals) > 1:
-                    cv_values.append(np.std(intervals) / np.mean(intervals))  # CV: std/mean
+                    cv = np.std(intervals) / np.mean(intervals)  # CV: std/mean
+                    cv_values.append(cv)
 
+            # Filter CV values based on xlim
+            if xlim:
+                cv_values = [cv for cv in cv_values if xlim[0] <= cv <= xlim[1]]
+
+            # Create histogram
             plt.figure(figsize=(12, 6))
-            plt.hist(cv_values, bins=50, color='orange', alpha=0.7)
+            bins = np.linspace(xlim[0], xlim[1], bins) if xlim else bins  # Adjust bins to range
+            plt.hist(cv_values, bins=bins, color='orange', alpha=0.7, label='Histogram')
+
+            # Add KDE if enabled
+            if kde:
+                from scipy.stats import gaussian_kde
+                density = gaussian_kde(cv_values)
+                xs = np.linspace(min(cv_values), max(cv_values), 500)
+                plt.plot(xs, density(xs), color='blue', label='KDE')
+
+            # Set x-axis limits if specified
+            if xlim:
+                plt.xlim(xlim)
+
+            # Labels and title
             plt.xlabel('Coefficient of Variation (CV)')
             plt.ylabel('Count')
             plt.title(f'Coefficient of Variation of ISI: {dataset_name}')
+            plt.legend()
             plt.tight_layout()
+
+            # Save the plot
             plt.savefig(os.path.join(output_path, f"cv_of_isi_{dataset_name}.png"))
             plt.close()
 
@@ -564,6 +683,13 @@ class SpikeDataAnalysis:
             max_time = np.max(combined_train)
             bins = np.arange(0, max_time + bin_size, bin_size)
             firing_rate, _ = np.histogram(combined_train, bins=bins)
+
+
+             # Normalize by the number of neurons
+            num_neurons = len(train)
+            if num_neurons > 0:
+                firing_rate = firing_rate / num_neurons  # Normalize firing rate per neuron
+
 
             plt.figure(figsize=(12, 6))
             plt.plot(bins[:-1], firing_rate, color='red')
@@ -583,24 +709,29 @@ class SpikeDataAnalysis:
             current_time = 0
 
             while current_time + window_size <= max_time:
+                # Extract spikes within the current time window
                 windowed_trains = [
                     spike_times[(spike_times >= current_time) & (spike_times < current_time + window_size)] 
                     for spike_times in train
                 ]
-            
-                # pad arrays to the same length
+                
+                # Pad arrays to the same length
                 max_len = max(len(trains) for trains in windowed_trains)
                 padded_trains = np.array([np.pad(trains, (0, max_len - len(trains)), 'constant') for trains in windowed_trains])
 
-                # skip if all padded arrays are zeros or contain only a single unique value
+                # Skip if all padded arrays are zeros or contain only a single unique value
                 if np.all(padded_trains == 0) or np.all(padded_trains == padded_trains[0]):
                     current_time += window_size
                     continue
-            
-                # compute correlation if there are more than 1 valid time series
-                if padded_trains.shape[0] > 1:
-                    pairwise_corr = np.corrcoef(padded_trains)
-                    if not np.isnan(pairwise_corr).any():  # skip if correlation contains NaNs
+                
+                # Remove rows with zero standard deviation
+                valid_indices = [j for j in range(padded_trains.shape[0]) if np.std(padded_trains[j]) > 0]
+                if len(valid_indices) > 1:
+                    filtered_trains = padded_trains[valid_indices]
+                    
+                    # Compute pairwise correlations
+                    pairwise_corr = np.corrcoef(filtered_trains)
+                    if not np.isnan(pairwise_corr).any():  # Skip if correlation contains NaNs
                         synchrony_indices.append(np.mean(pairwise_corr[np.triu_indices_from(pairwise_corr, k=1)]))
                         time_points.append(current_time + window_size / 2)
 
@@ -617,6 +748,7 @@ class SpikeDataAnalysis:
                 plt.close()
             else:
                 print(f"No valid synchrony data for plotting for dataset: {dataset_name}")
+
 
     def plot_active_units_per_electrode(self, output_path, dataset_name):
         plt.close('all')
@@ -702,15 +834,19 @@ class SpikeDataAnalysis:
                     neuron_y.append(y)
                     sttc_marker_size.append(sttc_sums[j])
 
+            neuron_x = np.array(neuron_x)
+            neuron_y = np.array(neuron_y)
+            sttc_marker_size = np.array(sttc_marker_size)
+
             legend_rates = np.percentile(sttc_sums, [50, 75, 90, 98])
 
             plt.figure(figsize=(11, 9))
-            plt.scatter(neuron_x, neuron_y, s=sttc_marker_size * 100, alpha=0.4, c='b', edgecolors='none')
+            plt.scatter(neuron_x, neuron_y, s=sttc_marker_size * 100, alpha=0.4, c='r', edgecolors='none')
         
             for rate in legend_rates:
                 plt.scatter([], [], s=rate * 100, c='r', alpha=0.4, label=f'STTC Sum {rate /100:.2f}')
 
-            plt.legend(scatterpoints=1, frameon=True, labelspacing=1.4, handletextpad=0.8, borderpad=0.92, title='STTC Sum', loc = 'best', title_fontsize=10, fontsize=10)
+            plt.legend(scatterpoints=1, frameon=True, labelspacing=1.4, handletextpad=0.8, borderpad=0.92, title='STTC Sum', loc = 'best', title_fontsize=10, fontsize=10, )
             plt.xlabel(r"Horizontal Position ($\mu$m)")
             plt.ylabel(r"Vertical Position ($\mu$m)")
             plt.title(f"Footprint Plot with STTC Sum : {dataset_name}")
@@ -719,7 +855,8 @@ class SpikeDataAnalysis:
 
     def plot_comparison_inverse_isi(self, output_path, base_names):
         """
-        Generate and save a comparison overlay plot for population-level inverse ISI for all datasets.
+        Generate and save a comparison overlay plot for population-level inverse ISI for all datasets,
+        normalized by the number of neurons.
         """
         plt.figure(figsize=(12, 6))
         for i, train in enumerate(self.trains):
@@ -728,16 +865,36 @@ class SpikeDataAnalysis:
                 intervals = np.diff(neuron_spikes)
                 if len(intervals) > 0:
                     all_intervals.extend(intervals)
-            inverse_isi = 1 / np.array(all_intervals)
-            plt.hist(inverse_isi, bins=100, alpha=0.5, label=base_names[i], density=True)
 
-        plt.xlabel("Instantaneous Firing Rate (Hz)")
+            # Remove zero intervals before calculating inverse ISI
+            all_intervals = np.array(all_intervals)
+            all_intervals = all_intervals[all_intervals > 0]  # Exclude zero or negative intervals
+
+            if len(all_intervals) > 0:
+                inverse_isi = 1 / all_intervals
+                inverse_isi = inverse_isi[np.isfinite(inverse_isi)]  # Exclude any infinities
+                
+                # Normalize by the number of neurons in the dataset
+                num_neurons = len(train)
+                if num_neurons > 0:
+                    inverse_isi /= num_neurons  # Normalize firing rate
+
+                # Apply clipping to remove extreme outliers
+                inverse_isi = inverse_isi[inverse_isi < 1000]  # Exclude values above 1000 Hz
+
+                # Use logarithmic bins if appropriate
+                bins = np.logspace(np.log10(1), np.log10(max(inverse_isi)), 50)  # Logarithmic bins
+                plt.hist(inverse_isi, bins=bins, alpha=0.5, label=base_names[i], density=True)
+                plt.xscale('log')  # Set x-axis to logarithmic scale
+
+        plt.xlabel("Normalized Instantaneous Firing Rate (Hz/neuron)")
         plt.ylabel("Density")
-        plt.title("Comparison: Population-Level Inverse ISI Across Datasets")
+        plt.title("Comparison: Population-Level Inverse ISI Across Datasets (Normalized)")
         plt.legend()
         plt.tight_layout()
-        plt.savefig(os.path.join(output_path, "comparison_population_inverse_isi.png"))
+        plt.savefig(os.path.join(output_path, "comparison_population_inverse_isi_normalized.png"))
         plt.close()
+
 
     def plot_comparison_regular_isi(self, output_path, base_names):
         """
@@ -774,7 +931,9 @@ class SpikeDataAnalysis:
         """
         if dataset_index >= len(self.trains):
             print(f"Dataset index {dataset_index} out of bounds.")
+            print(f"Dataset index {dataset_index} out of bounds. Total datasets: {len(self.trains)}")
             return None
+        print(f"Dataset {dataset_index} has {len(self.trains[dataset_index])} neurons and duration {self.durations[dataset_index]}.")
 
         train = self.trains[dataset_index]
         firing_rates = self.firing_rates_list[dataset_index]
@@ -824,35 +983,81 @@ class SpikeDataAnalysis:
                 intervals = np.diff(neuron_spikes)
                 if len(intervals) > 0:
                     all_intervals.extend(intervals)
-            inverse_isi = 1 / np.array(all_intervals)
 
-            plt.figure(figsize=(12, 6))
-            plt.hist(inverse_isi, bins=100, color='green', alpha=0.7, density=True)
-            plt.xlabel("Instantaneous Firing Rate (Hz)")
-            plt.ylabel("Density")
-            plt.title(f"Population-Level Inverse ISI: {dataset_name}")
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_path, f"population_inverse_isi_{dataset_name}.png"))
-            plt.close()
+            # Convert to a NumPy array and filter out zero or negative intervals
+            all_intervals = np.array(all_intervals)
+            all_intervals = all_intervals[all_intervals > 0]  # Exclude zero or negative intervals
+
+            if len(all_intervals) > 0:
+                # Calculate inverse ISI and exclude infinities
+                inverse_isi = 1 / all_intervals
+                inverse_isi = inverse_isi[np.isfinite(inverse_isi)]  # Exclude infinities
+
+                # Normalize by the number of neurons
+                num_neurons = len(train)
+                if num_neurons > 0:
+                    inverse_isi /= num_neurons
+
+                # Clip extreme values to avoid distortion in the plot
+                inverse_isi = inverse_isi[inverse_isi < 500]  # Adjust threshold as needed
+
+                # Create linear bins for the histogram
+                bins = np.linspace(0, 20, 50)  # Adjust range and bin count based on data
+
+                # Plot the histogram
+                plt.figure(figsize=(12, 6))
+                plt.hist(inverse_isi, bins=bins, color='green', alpha=0.7, density=True)
+                plt.xlabel("Normalized Instantaneous Firing Rate (Hz/neuron)")
+                plt.ylabel("Density")
+                plt.title(f"Population-Level Inverse ISI: {dataset_name}")
+                plt.tight_layout()
+                plt.savefig(os.path.join(output_path, f"population_inverse_isi_{dataset_name}.png"))
+                plt.close()
+
 
     def plot_neuron_inverse_isi(self, output_path, dataset_name, dataset_index=0):
+        """
+        Plot the inverse ISI histogram for a single neuron of interest.
+
+        Parameters:
+            output_path (str): Directory to save the plot.
+            dataset_name (str): Name of the dataset.
+            dataset_index (int): Index of the dataset to analyze.
+        """
+        # Find the neuron of interest
         neuron_index = self.find_neuron_of_interest(dataset_index)
         if neuron_index is None:
             print(f"Could not determine neuron of interest for dataset {dataset_name}. Skipping.")
             return
-        train = self.trains[dataset_index]
-        intervals = np.diff(train[neuron_index])
-        if len(intervals) > 0:
-            inverse_isi = 1 / intervals
 
+        # Get the spike train for the specified neuron
+        train = self.trains[dataset_index]
+        intervals = np.diff(train[neuron_index])  # Compute ISI
+
+        # Filter invalid intervals
+        intervals = intervals[intervals > 0]  # Remove zero or negative intervals
+
+        if len(intervals) > 0:
+            # Calculate inverse ISI and filter invalid values
+            inverse_isi = 1 / intervals
+            inverse_isi = inverse_isi[np.isfinite(inverse_isi)]  # Remove infinities
+
+            # Clip extreme values for better visualization
+            inverse_isi = inverse_isi[inverse_isi < 500]  # Exclude values above 500 Hz
+
+            # Plot the histogram
+            bins = np.linspace(0, 100, 50)  # Linear bins, adjust range as needed
             plt.figure(figsize=(12, 6))
-            plt.hist(inverse_isi, bins=100, color='blue', alpha=0.7, density=True)
+            plt.hist(inverse_isi, bins=bins, color='blue', alpha=0.7, density=True)
             plt.xlabel("Instantaneous Firing Rate (Hz)")
             plt.ylabel("Density")
             plt.title(f"Neuron {neuron_index} Inverse ISI: {dataset_name}")
             plt.tight_layout()
             plt.savefig(os.path.join(output_path, f"neuron_{neuron_index}_inverse_isi_{dataset_name}.png"))
             plt.close()
+        else:
+            print(f"No valid ISI intervals found for neuron {neuron_index} in dataset {dataset_name}. Skipping.")
+
 
     def plot_neuron_regular_isi(self, output_path, dataset_name, dataset_index=0):
         neuron_index = self.find_neuron_of_interest(dataset_index)
@@ -870,101 +1075,6 @@ class SpikeDataAnalysis:
             plt.tight_layout()
             plt.savefig(os.path.join(output_path, f"neuron_{neuron_index}_regular_isi_{dataset_name}.png"))
             plt.close()
-
-    @staticmethod
-    def calculate_pca(firing_rate_matrix, subset_neurons=None):
-        from sklearn.decomposition import PCA
-        """
-        Calculate PCA for a given firing rate matrix.
-
-        Parameters:
-            firing_rate_matrix (numpy.ndarray): Rows = Neurons, Columns = Conditions (datasets).
-            subset_neurons (int, optional): Number of top neurons (by mean firing rate) to include.
-                                            If None, all neurons are included.
-
-        Returns:
-            tuple: (pca_result, explained_variance, pca_object)
-                - pca_result: Transformed PCA coordinates (Neurons x PCs).
-                - explained_variance: Variance explained by each PC.
-                - pca_object: Fitted PCA object.
-        """
-        if np.all(firing_rate_matrix == firing_rate_matrix[0, :]):
-            print("Firing rate matrix has no variance. PCA computation skipped.")
-            return np.zeros_like(firing_rate_matrix), np.zeros(firing_rate_matrix.shape[1]), None
-
-        # optionally filter top neurons by mean firing rate
-        if subset_neurons:
-            mean_firing_rates = np.mean(firing_rate_matrix, axis=1)
-            top_indices = np.argsort(-mean_firing_rates)[:subset_neurons]  # Descending order
-            firing_rate_matrix = firing_rate_matrix[top_indices, :]
-
-        # perform PCA
-        pca = PCA()
-        pca_result = pca.fit_transform(firing_rate_matrix)
-        explained_variance = pca.explained_variance_ratio_
-
-        return pca_result, explained_variance, pca
-    
-    def prepare_pca(self, firing_rates_list, subset_neurons=None):
-        """
-        Prepare the firing rate matrix and calculate PCA.
-
-        Parameters:
-            firing_rates_list (list of list): Firing rates for all datasets.
-            subset_neurons (int, optional): Number of top neurons (by mean firing rate) to include.
-                                            If None, all neurons are included.
-
-        Returns:
-            tuple: (pca_result, explained_variance)
-                - pca_result: Transformed PCA coordinates (Neurons x PCs).
-                - explained_variance: Variance explained by each PC.
-        """
-        # prepare firing rate matrix: rows = neurons, columns = conditions
-        all_firing_rates = [np.array(firing_rates) for firing_rates in firing_rates_list]
-        firing_rate_matrix = np.vstack(all_firing_rates).T
-
-        # calculate PCA
-        pca_result, explained_variance, _ = SpikeDataAnalysis.calculate_pca(firing_rate_matrix, subset_neurons=subset_neurons)
-
-        return pca_result, explained_variance
-
-    # define PCA plotting function
-    def plot_pca(self, pca_result, explained_variance, output_path, base_names):
-        """
-        Plot PCA results: scatter plot (PC1 vs PC2) and scree plot.
-
-        Parameters:
-            pca_result (numpy.ndarray): Transformed PCA coordinates (Neurons x PCs).
-            explained_variance (numpy.ndarray): Variance explained by each PC.
-            output_path (str): Directory to save the PCA plots.
-            base_names (list of str): Names of the datasets/conditions.
-        """
-        # scatter Plot: neurons in PCA space (PC1 vs PC2)
-        plt.figure(figsize=(10, 8))
-        for i in range(len(base_names)):
-            plt.scatter(
-                pca_result[:, 0][i::len(base_names)],
-                pca_result[:, 1][i::len(base_names)],
-                label=base_names[i],
-                alpha=0.7
-            )
-        plt.xlabel("PC1")
-        plt.ylabel("PC2")
-        plt.title("PCA of Firing Rate Variance (PC1 vs PC2)")
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_path, "pca_scatter_plot.png"))
-        plt.close()
-
-        # scree plot: variance explained by each PC
-        plt.figure(figsize=(10, 6))
-        plt.bar(range(1, len(explained_variance) + 1), explained_variance, alpha=0.7)
-        plt.xlabel("Principal Component")
-        plt.ylabel("Proportion of Variance Explained")
-        plt.title("Scree Plot of PCA Components")
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_path, "pca_scree_plot.png"))
-        plt.close()
 
     def plot_high_activity_rasters(self, output_path, dataset_name):
         """
@@ -1143,7 +1253,7 @@ class SpikeDataAnalysis:
         """
         Generate KDE and PDF plots for STTC values for all datasets.
         """
-        for train, duration, name in zip(self.trains, self.durations, dataset_name):
+        for train, duration in zip(self.trains, self.durations):
             sttc_matrix = self.compute_sttc_matrix(train, duration)
             sttc_values = self.get_upper_triangle_values(sttc_matrix)
             if sttc_values.size == 0:
@@ -1166,26 +1276,38 @@ class SpikeDataAnalysis:
 
             plt.xlabel('STTC Values')
             plt.ylabel('Density')
-            plt.title(f'STTC KDE and PDF: {name}')
+            plt.title(f'STTC KDE and PDF: {dataset_name}')
             plt.legend()
             plt.tight_layout()
 
-            plot_name = os.path.join(output_path, f"kde_pdf_{name}.png")
+            plot_name = os.path.join(output_path, f"kde_pdf_{dataset_name}.png")
             plt.savefig(plot_name)
             plt.close()
+
     def plot_comparison_kde_pdf(self, output_path, base_names):
         """
         Generate comparison KDE/PDF overlay plots for all datasets.
         """
-        plt.figure(figsize=(12, 6))
+        import scipy.stats
+        import matplotlib.cm as cm
 
-        for train, duration, name in zip(self.trains, self.durations, base_names):
+        fig, ax_kde = plt.subplots(figsize=(12, 6))
+        cmap = cm.get_cmap('tab10') #get colormap
+
+        ax_pdf = ax_kde.twinx()  # secondary y-axis for PDF Density
+
+        legend_items = []  # to store legend handles and labels in order
+
+        for idx, (train, duration, name) in enumerate(zip(self.trains, self.durations, base_names)):
             sttc_matrix = self.compute_sttc_matrix(train, duration)
             sttc_values = self.get_upper_triangle_values(sttc_matrix)
 
             if sttc_values.size == 0:
-                print(f"Warning: No valid STTC values for dataset {dataset_name}. Skipping plot.")
+                print(f"Warning: No valid STTC values for dataset {name_cleaned}. Skipping plot.")
                 continue
+
+            name_cleaned = name.replace('_acqm', '') #cleaning up the name to make legend smaller
+            color = cmap(idx %10) # assign color based on index
 
             # KDE computation
             kde = scipy.stats.gaussian_kde(sttc_values)
@@ -1193,17 +1315,31 @@ class SpikeDataAnalysis:
             kde_values = kde(x_range)
 
             # overlay KDE and PDF
-            plt.plot(x_range, kde_values, label=f'{name} (KDE)', alpha=0.7)
-            plt.hist(sttc_values, bins=50, density=True, alpha=0.3, label=f'{name} (PDF)')
+            kde_line = ax_kde.plot(x_range, kde_values, label=f'{name_cleaned} (KDE)', alpha=0.7, color=color)
+            pdf_bars= ax_pdf.hist(sttc_values, bins=50, density=True, alpha=0.3, label=f'{name_cleaned} (PDF)', color=color)
+
+            # append to legend items in order
+            legend_items.append((kde_line, f'{name} (KDE)'))
+            legend_items.append((pdf_bars[2][0], f'{name} (PDF)'))  # use the first patch of the histogram
 
         # add threshold annotations
-        plt.axvline(x=0.2, color='orange', linestyle='--', label='Threshold: |STTC|=0.2')
-        plt.axvline(x=0.5, color='red', linestyle='--', label='Threshold: |STTC|=0.5')
+        line_thresh_02 = ax_kde.axvline(x=0.2, color='pink', linestyle='--', label='Threshold: |STTC|=0.2')
+        line_thresh_05 = ax_kde.axvline(x=0.5, color='red', linestyle='--', label='Threshold: |STTC|=0.5')
 
-        plt.xlabel('STTC Values')
-        plt.ylabel('Density')
+        # append threshold lines to legend items
+        legend_items.append((line_thresh_02, 'Threshold: |STTC|=0.2'))
+        legend_items.append((line_thresh_05, 'Threshold: |STTC|=0.5'))
+
+        # set axis labels and title
+        ax_kde.set_xlabel('STTC Values')
+        ax_kde.set_ylabel('KDE: Smoothed Density per Unit (Area=1)')
+        ax_pdf.set_ylabel('PDF: Density per Bin (Area=1)')
+
+        # set the custom legend
+        handles, labels = zip(*legend_items)
+        ax_kde.legend(handles, labels, loc='best')
+
         plt.title('Comparison: STTC KDE and PDF Across Datasets')
-        plt.legend()
         plt.tight_layout()
 
         plot_name = os.path.join(output_path, "comparison_kde_pdf.png")
@@ -1223,6 +1359,16 @@ class SpikeDataAnalysis:
 
         from itertools import combinations
 
+        def clean_name(base_name, all_base_names):
+            import os
+            
+            split_names = [set(name.split("_")) for name in all_base_names] # split name into components using "_" as delimiter
+            common_parts = set.intersection(*split_names) # find common components shared across names
+            # remove the common parts from each name and rejoin
+            cleaned_name = "_".join([part for part in base_name.split("_") if part not in common_parts])
+            return cleaned_name
+
+
         # metric computation logic
         def compute_metric(metric):
             if metric == "sttc":
@@ -1237,7 +1383,8 @@ class SpikeDataAnalysis:
                     all_intervals = []
                     for neuron_spikes in train:
                         all_intervals.extend(np.diff(neuron_spikes))
-                    values.append(np.array(all_intervals))
+                    valid_intervals = [x for x in all_intervals if np.isfinite(1 / x)]
+                    values.append(np.array(valid_intervals))
                 return values
             elif metric == "firing_rate":
                 return self.firing_rates_list
@@ -1251,10 +1398,14 @@ class SpikeDataAnalysis:
         for (i, j) in combinations(range(len(base_names)), 2):
             dataset_1 = metric_values_list[i]
             dataset_2 = metric_values_list[j]
-            name_1 = base_names[i]
-            name_2 = base_names[j]
+            name_1 = clean_name(base_names[i], base_names)
+            name_2 = clean_name(base_names[j], base_names)
 
-            # Scatter plot
+            min_size = min(len(dataset_1), len(dataset_2))
+            dataset_1 = dataset_1[:min_size]
+            dataset_2 = dataset_2[:min_size]
+
+            # scatter plot
             plt.figure(figsize=(10, 8))
             plt.scatter(dataset_1, dataset_2, alpha=0.7, label=f"{name_1} vs {name_2}")
             plt.plot([0, max(dataset_1 + dataset_2)], [0, max(dataset_1 + dataset_2)], 'r--', label="Equality Line")
@@ -1267,7 +1418,7 @@ class SpikeDataAnalysis:
             plt.savefig(plot_filename)
             plt.close()
 
-    def plot_global_linear_comparison(self, output_path, base_names, metric):
+    def plot_global_metric_comparison(self, output_path, base_names, metric):
         """
         Global linear comparison of a given metric across all datasets.
 
@@ -1277,9 +1428,16 @@ class SpikeDataAnalysis:
             metric (str): Metric to compute and compare ("sttc", "isi", "firing_rate").
         """
         # skip if fewer than three datasets 
+        import os
+
         if len(base_names) < 3:
             print("Global comparison requires at least three datasets. Skipping.")
             return
+        
+        split_names = [set(name.split("_")) for name in base_names] # split name into components using "_" as delimiter
+        common_parts = set.intersection(*split_names) # find common components shared across names
+        # remove the common parts from each name and rejoin
+        cleaned_names = ["_".join([part for part in name.split("_") if part not in common_parts])for name in base_names]
 
         # metric computation logic
         def compute_metric(metric):
@@ -1307,106 +1465,272 @@ class SpikeDataAnalysis:
 
         # global comparison: scatter plots for each condition against the other two
         plt.figure(figsize=(12, 8))
-        for i, (dataset, name) in enumerate(zip(metric_values_list, base_names)):
-            plt.scatter([name] * len(dataset), dataset, label=name, alpha=0.7)
+        for dataset, cleaned_name in zip(metric_values_list, cleaned_names):
+            plt.scatter([cleaned_name] * len(dataset), dataset, label=cleaned_name, alpha=0.7)
 
         # add labels and save the plot
-        plt.xlabel("Condition")
+        plt.xlabel("Dataset")
         plt.ylabel(f"{metric.capitalize()} Values")
-        plt.title(f"Global Linear Comparison: {metric.capitalize()} Across All Conditions")
+        plt.title(f"Global Comparison: Point Level Distribution of {metric.capitalize()} Across All Datasets")
         plt.legend()
         plt.tight_layout()
         plot_filename = os.path.join(output_path, f"{metric}_global_comparison.png")
         plt.savefig(plot_filename)
         plt.close()
 
-    def calculate_continuous_pca(self, bin_size=0.1):
+
+    def calculate_static_fr_pca_whole(self, subset_neurons=None):
         """
-        Calculate PCA on time-binned firing rates for continuous analysis.
+        Calculate PCA for static firing rates across all datasets, truncating to the size of the smallest dataset.
+
+        Parameters:
+            subset_neurons (int, optional): Number of top neurons (by mean firing rate) to include.
+                                            If None, all neurons are included.
+
+        Returns:
+            tuple: (pca_result, explained_variance)
+                - pca_result: Transformed PCA coordinates (Neurons x PCs).
+                - explained_variance: Variance explained by each PC.
+        """
+        from sklearn.decomposition import PCA
+        import numpy as np
+
+        # Construct firing rate matrices for all datasets
+        firing_rate_matrices = [
+            np.array(firing_rates).reshape(-1, 1) for firing_rates in self.firing_rates_list
+        ]
+
+        # Determine the minimum number of neurons across datasets
+        min_neurons = min(matrix.shape[0] for matrix in firing_rate_matrices)
+
+        # Truncate matrices to the size of the smallest dataset
+        truncated_matrices = [
+            matrix[:min_neurons, :] for matrix in firing_rate_matrices
+        ]
+
+        # Combine truncated matrices into a single matrix (neurons x datasets)
+        combined_matrix = np.hstack(truncated_matrices)
+
+        # Normalize by the total number of neurons
+        total_neurons = combined_matrix.shape[0]
+        combined_matrix = combined_matrix / total_neurons
+
+        # Optionally filter top neurons by mean firing rate
+        if subset_neurons:
+            mean_firing_rates = np.mean(combined_matrix, axis=1)
+            top_indices = np.argsort(-mean_firing_rates)[:subset_neurons]
+            combined_matrix = combined_matrix[top_indices, :]
+
+        # Check for valid firing rate matrix dimensions
+        if combined_matrix.shape[0] < 2 or combined_matrix.shape[1] < 2:
+            raise ValueError("Firing rate matrix is too small for PCA. Ensure sufficient neurons and datasets are included.")
+
+        # Perform PCA
+        pca = PCA()
+        pca_result = pca.fit_transform(combined_matrix)
+        explained_variance = pca.explained_variance_ratio_
+
+        return pca_result, explained_variance
+
+
+
+    def calculate_individual_time_binned_pca(self, bin_size=0.1, subset_neurons=None):
+        """
+        Calculate PCA on time-binned firing rates for each dataset independently.
 
         Parameters:
             bin_size (float): Time bin size in seconds.
+            subset_neurons (int, optional): Number of top neurons (by mean firing rate) to include.
+                                            If None, all neurons are included.
 
         Returns:
-            tuple: (pca_continuous_result, explained_variance_continuous, time_bins_continuous)
-                - pca_continuous_result: Transformed PCA coordinates (time bins x PCs).
-                - explained_variance_continuous: Variance explained by each PC.
-                - time_bins_continuous: Array of time bin centers.
+            list of tuples: [(pca_result, explained_variance, time_bins, dataset_name), ...]
+                Each tuple contains:
+                    - pca_result: Transformed PCA coordinates (time bins x PCs).
+                    - explained_variance: Variance explained by each PC.
+                    - time_bins: Array of time bin centers.
+                    - dataset_name: Name of the dataset.
         """
         from sklearn.decomposition import PCA
+        results = []
 
-        # determine the number of bins and create bin edges
-        max_time = max(self.durations)
-        num_bins = int(max_time // bin_size) + 1
-        bin_edges = np.linspace(0, max_time, num_bins)
+        for train, duration, dataset_name in zip(self.trains, self.durations, self.input_paths):
+            # Determine bin edges based on duration
+            num_bins = int(duration // bin_size) + 1
+            bin_edges = np.linspace(0, duration, num_bins)
 
-        # compute time-binned firing rates for all datasets
-        time_binned_firing_rates = []
-        for train in self.trains:
+            # Compute time-binned firing rates
             binned_rates = np.array([
                 np.histogram(neuron_spikes, bins=bin_edges)[0] / bin_size
                 for neuron_spikes in train
-            ])
-            time_binned_firing_rates.append(binned_rates.T)  # transpose for PCA (rows = time bins)
+            ]).T
+            binned_rates /= len(train)  # Normalize by number of neurons in the dataset
 
-        # combine datasets into one matrix for PCA
-        combined_matrix = np.vstack(time_binned_firing_rates)
+            # Optionally filter top neurons by mean firing rate
+            if subset_neurons:
+                mean_firing_rates = np.mean(binned_rates, axis=0)
+                top_indices = np.argsort(-mean_firing_rates)[:subset_neurons]
+                binned_rates = binned_rates[:, top_indices]
 
-        # perform PCA
-        pca = PCA()
-        pca_continuous_result = pca.fit_transform(combined_matrix)
-        explained_variance_continuous = pca.explained_variance_ratio_
+            # Perform PCA
+            pca = PCA()
+            pca_result = pca.fit_transform(binned_rates)
+            explained_variance = pca.explained_variance_ratio_
 
-        # calculate time bin centers for visualization
-        time_bins_continuous = bin_edges[:-1] + (bin_size / 2)
+            # Store results
+            time_bins = bin_edges[:-1] + (bin_size / 2)
+            results.append((pca_result, explained_variance, time_bins, os.path.basename(dataset_name)))
 
-        return pca_continuous_result, explained_variance_continuous, time_bins_continuous
+        return results
 
-    def plot_continuous_pca(self, pca_continuous_result, explained_variance_continuous, time_bins_continuous, output_path, base_names):
+    def calculate_static_pca_individual(self, subset_neurons=None):
         """
-        Plot PCA results for continuous analysis.
+        Calculate PCA for static firing rates for each dataset independently.
 
         Parameters:
-            pca_continuous_result: PCA-transformed data (time bins x PCs).
-            explained_variance_continuous: Variance explained by each PC.
-            time_bins_continuous: Array of time bin centers.
-            output_path: Directory to save the plots (comparison directory).
-            base_names: Names of datasets for labeling.
-        """
-        os.makedirs(output_path, exist_ok=True)
+            subset_neurons (int, optional): Number of top neurons (by mean firing rate) to include.
+                                            If None, all neurons are included.
 
-        # scatter plot: PC1 vs PC2 (colored by time)
+        Returns:
+            list: List of tuples (pca_result, explained_variance, dataset_name) for each dataset.
+        """
+        from sklearn.decomposition import PCA
+        results = []
+
+        for firing_rates, dataset_name in zip(self.firing_rates_list, self.input_paths):
+            firing_rate_matrix = np.array(firing_rates).reshape(-1, 1)  # Reshape for PCA
+
+            # Optionally filter top neurons by mean firing rate
+            if subset_neurons:
+                top_indices = np.argsort(-firing_rate_matrix.flatten())[:subset_neurons]
+                firing_rate_matrix = firing_rate_matrix[top_indices]
+
+            # Normalize by the number of neurons
+            firing_rate_matrix /= len(firing_rates)
+
+            # Perform PCA
+            pca = PCA()
+            pca_result = pca.fit_transform(firing_rate_matrix)
+            explained_variance = pca.explained_variance_ratio_
+
+            results.append((pca_result, explained_variance, os.path.basename(dataset_name)))
+
+        return results
+
+    def plot_static_fr_pca_whole(self, pca_result, explained_variance, output_path):
+        """
+        Plot PCA results for static firing rates.
+
+        Parameters:
+            pca_result (numpy.ndarray): Transformed PCA coordinates (Neurons x PCs).
+            explained_variance (numpy.ndarray): Variance explained by each PC.
+            output_path (str): Directory to save the PCA plots.
+        """
+        # scatter Plot: neurons in PCA space (PC1 vs PC2)
         plt.figure(figsize=(10, 8))
-        plt.scatter(pca_continuous_result[:, 0], pca_continuous_result[:, 1], c=np.tile(time_bins_continuous, len(base_names)), cmap='viridis', alpha=0.7)
-        plt.colorbar(label='Time (s)')
+        plt.scatter(pca_result[:, 0], pca_result[:, 1], alpha=0.7)
         plt.xlabel("PC1")
         plt.ylabel("PC2")
-        plt.title("Continuous PCA: PC1 vs PC2 (Colored by Time)")
+        plt.title("PCA of Firing Rate Variance (PC1 vs PC2, All Datasets) (Truncated to smallest dataset)")
         plt.tight_layout()
-        plt.savefig(os.path.join(output_path, "continuous_pca_scatter.png"))
+        plt.savefig(os.path.join(output_path, "pca_scatter_plot_static_whole.png"))
         plt.close()
 
-        # component time series (first few PCs)
-        plt.figure(figsize=(12, 6))
-        for i in range(3):  # plot first 3 PCs
-            plt.plot(time_bins_continuous, pca_continuous_result[:, i], label=f"PC{i+1}")
-        plt.xlabel("Time (s)")
-        plt.ylabel("Component Value")
-        plt.title("PCA Components Over Time")
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_path, "continuous_pca_time_series.png"))
-        plt.close()
-
-        # scree plot: explained variance
+        # scree plot: variance explained by each PC
         plt.figure(figsize=(10, 6))
-        plt.bar(range(1, len(explained_variance_continuous) + 1), explained_variance_continuous, alpha=0.7)
+        plt.bar([1, 2, 3], explained_variance[:3], alpha=0.7)  # only plot the first three PCs
+        plt.xticks([1,2,3])
         plt.xlabel("Principal Component")
         plt.ylabel("Proportion of Variance Explained")
-        plt.title("Scree Plot of Continuous PCA Components")
+        plt.title("Scree Plot of PCA Components (All Datasets) (Truncated to smallest dataset)")
         plt.tight_layout()
-        plt.savefig(os.path.join(output_path, "continuous_pca_scree_plot.png"))
+        plt.savefig(os.path.join(output_path, "pca_scree_plot_static_whole.png"))
         plt.close()
+
+    def plot_individual_time_binned_pca(self, pca_results, output_path):
+        """
+        Plot PCA results for each dataset independently.
+
+        Parameters:
+            pca_results: List of PCA results (output of `calculate_individual_time_binned_pca`).
+            output_path: Directory to save the plots.
+        """
+        for pca_result, explained_variance, time_bins, dataset_name in pca_results:
+            dataset_dir = os.path.join(output_path, dataset_name)
+            os.makedirs(dataset_dir, exist_ok=True)
+
+            # Scatter plot: PC1 vs PC2 (colored by time)
+            plt.figure(figsize=(10, 8))
+            plt.scatter(pca_result[:, 0], pca_result[:, 1], c=time_bins, cmap='viridis', alpha=0.7)
+            plt.colorbar(label='Time (s)')
+            plt.xlabel("PC1")
+            plt.ylabel("PC2")
+            plt.title(f"PCA Scatter: {dataset_name} (PC1 vs PC2)")
+            plt.tight_layout()
+            plt.savefig(os.path.join(dataset_dir, f"{dataset_name}_pca_scatter.png"))
+            plt.close()
+
+            # Component time series (first few PCs)
+            subplots_dir = os.path.join(dataset_dir, "pca_time_series_plots")
+            os.makedirs(subplots_dir, exist_ok=True)
+            segment_length = int(len(time_bins) / 5)  # Divide into 5 segments
+            for segment_idx in range(5):
+                start_idx = segment_idx * segment_length
+                end_idx = start_idx + segment_length
+
+                plt.figure(figsize=(12, 6))
+                for pc_idx in range(3):  # Plot first 3 PCs
+                    plt.plot(time_bins[start_idx:end_idx], pca_result[start_idx:end_idx, pc_idx], label=f"PC{pc_idx + 1}")
+
+                plt.xlabel("Time (s)")
+                plt.ylabel("Component Value")
+                plt.title(f"PCA Components Over Time (Segment {segment_idx + 1}/5)")
+                plt.legend()
+                plt.tight_layout()
+                plt.savefig(os.path.join(subplots_dir, f"pca_time_series_segment_{segment_idx + 1}.png"))
+                plt.close()
+
+            # Scree plot: explained variance
+            plt.figure(figsize=(10, 6))
+            plt.bar(range(1, len(explained_variance) + 1), explained_variance, alpha=0.7)
+            plt.xlabel("Principal Component")
+            plt.ylabel("Proportion of Variance Explained")
+            plt.title(f"Scree Plot: {dataset_name}")
+            plt.tight_layout()
+            plt.savefig(os.path.join(dataset_dir, f"{dataset_name}_pca_scree_plot.png"))
+            plt.close()
+
+    def plot_static_pca_individual(self, pca_results, output_path):
+        """
+        Plot PCA results for static firing rates for each dataset.
+
+        Parameters:
+            pca_results: List of PCA results (output of `calculate_static_pca_individual`).
+            output_path: Directory to save the plots.
+        """
+        for (pca_result, explained_variance, dataset_name) in pca_results:
+            dataset_dir = os.path.join(output_path, dataset_name)
+            os.makedirs(dataset_dir, exist_ok=True)
+
+            # Scatter Plot: PC1 vs PC2
+            plt.figure(figsize=(10, 8))
+            plt.scatter(pca_result[:, 0], pca_result[:, 1], alpha=0.7)
+            plt.xlabel("PC1")
+            plt.ylabel("PC2")
+            plt.title(f"PCA of Firing Rate Variance (PC1 vs PC2): {dataset_name}")
+            plt.tight_layout()
+            plt.savefig(os.path.join(dataset_dir, f"{dataset_name}_pca_scatter.png"))
+            plt.close()
+
+            # Scree plot: variance explained by each PC
+            plt.figure(figsize=(10, 6))
+            plt.bar(range(1, len(explained_variance) + 1), explained_variance, alpha=0.7)
+            plt.xlabel("Principal Component")
+            plt.ylabel("Proportion of Variance Explained")
+            plt.title(f"Scree Plot: {dataset_name}")
+            plt.tight_layout()
+            plt.savefig(os.path.join(dataset_dir, f"{dataset_name}_pca_scree_plot.png"))
+            plt.close()
 
     def analyze_burst_characteristics(self, output_path, dataset_names):
         """
@@ -1419,9 +1743,20 @@ class SpikeDataAnalysis:
         Saves:
             Comparison plots for burst characteristics in the comparison directory.
         """
+        # Define clean_name helper function
+        def clean_name(base_name, all_base_names):
+            split_names = [set(name.split("_")) for name in all_base_names]  # Split names into components
+            common_parts = set.intersection(*split_names)  # Find common components shared across all names
+            # Remove common parts and rejoin
+            cleaned_name = "_".join([part for part in base_name.split("_") if part not in common_parts])
+            return cleaned_name
+
         # Use the pre-existing comparison directory
         comparison_dir = os.path.join(output_path, "comparisons", "burst_characteristics")
         os.makedirs(comparison_dir, exist_ok=True)
+
+        # Clean dataset names
+        cleaned_dataset_names = [clean_name(name, dataset_names) for name in dataset_names]
 
         # Initialize storage for comparisons across datasets
         all_burst_intervals = []
@@ -1458,14 +1793,18 @@ class SpikeDataAnalysis:
             all_neuron_participation.append(neuron_participation)
 
         # Comparison Plots
-        # Inter-Burst Interval Comparison
+        # Inter-Burst Interval (ISI) Comparison
         plt.figure(figsize=(12, 6))
+        max_isi = 0  # Track the maximum ISI for axis adjustment
         for i, burst_intervals in enumerate(all_burst_intervals):
-            plt.hist(burst_intervals, bins=50, alpha=0.5, label=dataset_names[i], density=True)
+            if len(burst_intervals) > 0:
+                max_isi = max(max_isi, max(burst_intervals))  # Update max ISI for axis scaling
+                plt.hist(burst_intervals, bins=50, alpha=0.5, label=cleaned_dataset_names[i], density=True)
         plt.xlabel('Inter-Burst Interval (s)')
         plt.ylabel('Density')
         plt.title('Comparison: Inter-Burst Interval Across Datasets')
         plt.legend()
+        plt.xlim(0, max_isi * 1.1)  # Set x-axis limit based on data
         plt.tight_layout()
         plt.savefig(os.path.join(comparison_dir, "comparison_inter_burst_interval.png"))
         plt.close()
@@ -1473,7 +1812,7 @@ class SpikeDataAnalysis:
         # Burst Frequency vs. Duration Comparison
         plt.figure(figsize=(12, 6))
         for i, (burst_frequencies, burst_durations) in enumerate(zip(all_burst_frequencies, all_burst_durations)):
-            plt.scatter(burst_frequencies, burst_durations, alpha=0.6, label=dataset_names[i])
+            plt.scatter(burst_frequencies, burst_durations, alpha=0.6, label=cleaned_dataset_names[i])
         plt.xlabel('Burst Frequency (Hz)')
         plt.ylabel('Burst Duration (s)')
         plt.title('Comparison: Burst Frequency vs. Duration Across Datasets')
@@ -1485,7 +1824,7 @@ class SpikeDataAnalysis:
         # Neuron Participation Comparison
         plt.figure(figsize=(12, 6))
         for i, neuron_participation in enumerate(all_neuron_participation):
-            plt.hist(neuron_participation, bins=50, alpha=0.5, label=dataset_names[i], density=True)
+            plt.hist(neuron_participation, bins=50, alpha=0.5, label=cleaned_dataset_names[i], density=True)
         plt.xlabel('Neuron Participation Count')
         plt.ylabel('Density')
         plt.title('Comparison: Neuron Participation Across Datasets')
@@ -1551,13 +1890,13 @@ class SpikeDataAnalysis:
             self.plot_sttc_vmin_vmax(dataset_dir, dataset_name)
             self.plot_sttc_thresh(dataset_dir, dataset_name)
             self.plot_kde_pdf(dataset_dir, dataset_name)
-            self.sttc_violin_plot_by_firing_rate(dataset_dir, [dataset_name])
-            self.sttc_violin_plot_by_proximity(dataset_dir, [dataset_name])
+            self.sttc_violin_plot_by_firing_rate_individual(dataset_dir, dataset_name)
+            self.sttc_violin_plot_by_proximity_individual(dataset_dir, dataset_name)
 
 
         # generate comparison plots
-        self.sttc_violin_plot_by_firing_rate(comparison_dir, base_names)
-        self.sttc_violin_plot_by_proximity(comparison_dir, base_names)
+        self.sttc_violin_plot_by_firing_rate_compare(comparison_dir, base_names)
+        self.sttc_violin_plot_by_proximity_compare(comparison_dir, base_names)
         self.sttc_violin_plot_across_recordings(comparison_dir, base_names)
         self.plot_comparison_inverse_isi(comparison_dir, base_names)
         self.plot_comparison_regular_isi(comparison_dir, base_names)
@@ -1576,18 +1915,33 @@ class SpikeDataAnalysis:
         #global linear comparison (for 3+ datasets)
         if len(self.trains) >= 3:
             for metric in metrics:
-                self.plot_global_linear_comparison(global_dir, base_names, metric)
+                self.plot_global_metric_comparison(global_dir, base_names, metric)
 
 
         # optional PCA analysis
         if perform_pca:
-            # prepare PCA
-            pca_result, explained_variance = self.prepare_pca(self.firing_rates_list) #averaged pca
-            pca_continuous_result, explained_variance_continuous, time_bins_continuous = self.calculate_continuous_pca() #continuous pca
+            # define the subset of neurons, if needed 
+            subset_neurons = None  # replace with an integer to limit the number of neurons or leave as None
 
-            # plot  pca
-            self.plot_pca(pca_result, explained_variance, comparison_dir, base_names) #averaged pca
-            self.plot_continuous_pca(pca_continuous_result, explained_variance_continuous, time_bins_continuous, comparison_dir, base_names) #continuous pca
+            # ==== PCA Calculations ====
+            # aggregate PCA calculations
+            pca_result, explained_variance = self.calculate_static_fr_pca_whole(subset_neurons=subset_neurons)  # static aggregate PCA
+
+            # individual PCA calculations
+            pca_results = self.calculate_individual_time_binned_pca(
+                bin_size=0.1, subset_neurons=subset_neurons
+            )  # individual time-binned PCA
+            results = self.calculate_static_pca_individual(subset_neurons=subset_neurons)  # individual static PCA
+
+            # ==== PCA Plotting ====
+            # aggregate PCA plotting
+            self.plot_static_fr_pca_whole(pca_result, explained_variance, comparison_dir)  # averaged PCA
+
+
+            # individual PCA plotting
+            self.plot_individual_time_binned_pca(pca_results, comparison_dir)  # individual time-binned PCA
+            self.plot_static_pca_individual(results, comparison_dir)  # individual static PCA
+
 
 
         # zip output folder
