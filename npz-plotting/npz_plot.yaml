@@ -1,25 +1,25 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: npz-plot
+  name: midbrain-d55-plotting
 spec:
   backoffLimit: 2
   template:
     spec:
       containers:
       - name: npz-plots
-        image: aidanmorson/npz-plotting:v2
+        image: aidanmorson/npz-plotting:v2.1
         imagePullPolicy: Always
         resources:
 
           # GPU Run
           requests:
-            cpu: "14"
-            memory: "200Gi"
+            cpu: "15"
+            memory: "250Gi"
             ephemeral-storage: "250Gi"
           limits:
-            cpu: "14"
-            memory: "200Gi"
+            cpu: "15"
+            memory: "250Gi"
             ephemeral-storage: "250Gi"
 
         command: ["stdbuf", "-i0", "-o0", "-e0", "/usr/bin/time", "-v", "python", "aws_npz_plot_gen.py"]
@@ -27,7 +27,7 @@ spec:
           - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/derived/kilosort2/24432_SmitsMO_D55_sect300_T2PostDrug150-24hr_20241107_acqm.zip
           - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/derived/kilosort2/24481_SmitsMO_D55_sect300_Control-24hr_20241107_acqm.zip
           - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/derived/kilosort2/24578_SmitsMO_D55_sect300_T2PostDrug175-24hr_20241107_acqm.zip
-          - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/derived/kilosort2/
+          - s3://braingeneersdev/amorson/
           - --pca
           - --cleanup
         env:

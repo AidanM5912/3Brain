@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: curation-11-07-smitsmidbrain-all
+  name: curation-11-14-smitsmidbrain-all
 spec:
   backoffLimit: 2
   template:
@@ -24,8 +24,8 @@ spec:
 
         command: ["stdbuf", "-i0", "-o0", "-e0", "/usr/bin/time", "-v", "python", "si_curation.py"]
         args:
-          - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/
-          - s3://braingeneers/ephys/2024-11-07-e-SmitsMidbrain-24hour/params_midbrain_maxwell.json
+          - s3://braingeneers/ephys/2024-11-14-e-SmitsMidbrain-Drug/
+          - s3://braingeneers/ephys/2024-11-14-e-SmitsMidbrain-Drug/params_midbrain_maxwell.json
         env:
           - name: "PYTHONUNBUFFERED"
             value: "true"
