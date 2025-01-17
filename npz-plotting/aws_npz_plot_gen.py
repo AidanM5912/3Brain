@@ -89,16 +89,17 @@ class SpikeDataAnalysis:
                 if field not in data:
                     raise ValueError(f"Missing required field '{field}' in {npz_path}")
 
-            # Extract spike times and sampling rate
+            # extract spike times and sampling rate
             spike_times = data["train"].item()
             sampling_rate = data["fs"]
             train = [times / sampling_rate for _, times in spike_times.items()]
 
-            # Store data and attributes
+            # store data and attributes
             self.data_list.append(data)
             self.trains.append(train)
             self.durations.append(max([max(times) for times in train]))
             firing_rates = [len(neuron_spikes) / max([max(times) for times in train]) for neuron_spikes in train]
+            firing_rates = [rate / len(train) for rate in firing_rates]  # normalize by the total number of neurons
             self.firing_rates_list.append(firing_rates)
             self.neuron_data_list.append(data.get("neuron_data", {}).item())
             self.num_neurons_list.append(len(train))
@@ -115,19 +116,19 @@ class SpikeDataAnalysis:
 
     def clean_name(self, base_name, all_base_names):
 
-        # Normalize to lowercase for case-insensitive comparison
-        normalized_names = [re.sub(r'\W+', '_', name.lower()) for name in all_base_names]  # Replace non-alphanumeric with "_"
+        # normalize to lowercase for case-insensitive comparison
+        normalized_names = [re.sub(r'\W+', '_', name.lower()) for name in all_base_names]  # replace non-alphanumeric with "_"
         base_name_normalized = re.sub(r'\W+', '_', base_name.lower())
 
-        # Split names into components
+        # split names into components
         split_names = [set(name.split("_")) for name in normalized_names]
-        common_parts = set.intersection(*split_names)  # Find common components across all names
+        common_parts = set.intersection(*split_names)  # find common components across all names
 
-        # Remove common parts and rejoin
+        # remove common parts and rejoin
         cleaned_parts = [part for part in base_name_normalized.split("_") if part not in common_parts]
         cleaned_name = "_".join(cleaned_parts)
 
-        # Return the original name if cleaning results in an empty string
+        # return the original name if cleaning results in an empty string
         return cleaned_name if cleaned_name else base_name
 
 
@@ -164,20 +165,20 @@ class SpikeDataAnalysis:
         plt.close('all')
         for i, neuron_data in enumerate(self.neuron_data_list):
 
-            neuron_x, neuron_y, filtered_firing_rates = [], [], []
+            neuron_x, neuron_y, firing_rates = [], [], []
 
             for j, neuron in enumerate(neuron_data.values()):
                 x, y = neuron['position']
                 if (x, y) != (0, 0):  # exclude the calibration electrode
                     neuron_x.append(x)
                     neuron_y.append(y)
-                    filtered_firing_rates.append(self.firing_rates_list[i][j] / len(self.firing_rates_list[i]))
+                    firing_rates.append(self.firing_rates_list[i][j])
 
-            filtered_firing_rates = np.array(filtered_firing_rates)
-            legend_rates = np.percentile(filtered_firing_rates, [50, 75, 90, 98])
+            firing_rates = np.array(firing_rates)
+            legend_rates = np.percentile(firing_rates, [50, 75, 90, 98])
 
             plt.figure(figsize=(11, 9))
-            plt.scatter(neuron_x, neuron_y, s=filtered_firing_rates * 100, alpha=0.4, c='r', edgecolors='none')
+            plt.scatter(neuron_x, neuron_y, s=firing_rates * 100, alpha=0.4, c='r', edgecolors='none')
         
             for rate in legend_rates:
                 plt.scatter([], [], s=rate * 100, c='r', alpha=0.4, label=f'{rate:.2f} kHz')
@@ -1149,6 +1150,12 @@ class SpikeDataAnalysis:
         """
         Generate raster plots for high-activity periods with smaller time windows.
 
+        **************************************************
+        Disabled for now due to overcreating plots.
+        Moving out of Docker V2.1 and into a rasters doc.
+        From now on high_acitivity_rasters will be generated with a seperate job
+        **************************************************
+
         Parameters:
             output_path (str): Directory to save the raster plots.
             dataset_name (str): Name of the dataset.
@@ -1581,8 +1588,9 @@ class SpikeDataAnalysis:
         combined_matrix = np.hstack(truncated_matrices)
 
         # normalize by the total number of neurons
-        total_neurons = combined_matrix.shape[0]
-        combined_matrix = combined_matrix / total_neurons
+        #not needed anymore, we do this in load_npz_file now
+        #total_neurons = combined_matrix.shape[0]
+        #combined_matrix = combined_matrix / total_neurons
 
         # optionally filter top neurons by mean firing rate
         if subset_neurons:
@@ -1676,8 +1684,8 @@ class SpikeDataAnalysis:
                 top_indices = np.argsort(-firing_rate_matrix.flatten())[:subset_neurons]
                 firing_rate_matrix = firing_rate_matrix[top_indices]
 
-            # Normalize by the number of neurons
-            firing_rate_matrix /= len(firing_rates)
+            #not needed per function as we are doing this in load_npz_file now
+            #firing_rate_matrix /= len(firing_rates)
 
             # Perform PCA
             pca = PCA()
@@ -2005,11 +2013,11 @@ class SpikeDataAnalysis:
             os.makedirs(dataset_dir, exist_ok=True)
 
             # now creating a rasters subdirectory for each dataset. too many small rasters in the main directory seems annoying
-            rasters_dir = os.path.join(dataset_dir, "rasters")
-            os.makedirs(rasters_dir, exist_ok=True)
+            #rasters_dir = os.path.join(dataset_dir, "rasters")
+            #os.makedirs(rasters_dir, exist_ok=True)
 
 
-            dataset_directories.append((dataset_dir, rasters_dir, base_name))
+            dataset_directories.append((dataset_dir, base_name))
 
         # create a directory for comparison plots
         comparison_dir = os.path.join(output_folder, "comparisons")
@@ -2022,13 +2030,14 @@ class SpikeDataAnalysis:
         os.makedirs(global_dir, exist_ok=True)
 
         # perform analyses for each dataset
-        for i, (dataset_dir, rasters_dir, dataset_name) in enumerate(dataset_directories):
+        for i, (dataset_dir, dataset_name) in enumerate(dataset_directories):
             
             #create rasters 
-            self.raster_plot(rasters_dir, dataset_name)
-            self.plot_high_activity_rasters(rasters_dir, dataset_name)
+            #self.raster_plot(rasters_dir, dataset_name)
+            #self.plot_high_activity_rasters(rasters_dir, dataset_name)
 
             #regular analysis
+            self.raster_plot(dataset_dir, dataset_name)
             self.footprint_overlay_fr(dataset_dir, dataset_name)
             self.overlay_fr_raster(dataset_dir, dataset_name)
             self.plot_smoothed_population_fr(dataset_dir, dataset_name)

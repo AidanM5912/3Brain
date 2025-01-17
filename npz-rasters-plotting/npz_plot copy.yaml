@@ -1,0 +1,63 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: midbrain-d60-drugs-plotting
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      containers:
+      - name: npz-plots
+        image: aidanmorson/npz-plotting:v2.1
+        imagePullPolicy: Always
+        resources:
+
+          # GPU Run
+          requests:
+            cpu: "15"
+            memory: "250Gi"
+            ephemeral-storage: "400Gi"
+          limits:
+            cpu: "15"
+            memory: "250Gi"
+            ephemeral-storage: "400Gi"
+
+        command: ["stdbuf", "-i0", "-o0", "-e0", "/usr/bin/time", "-v", "python", "aws_npz_plot_gen.py"]
+        args:
+          - s3://braingeneers/ephys/2024-11-14-e-SmitsMidbrain-Drug/derived/kilosort2/24432_SmitsMO_D62_sect300_BASELINE_150-DIV8_20241114_acqm.zip
+          - s3://braingeneers/ephys/2024-11-14-e-SmitsMidbrain-Drug/derived/kilosort2/24432_SmitsMO_D62_sect300_GABA_150-DIV8_20241114_acqm.zip
+          - s3://braingeneers/ephys/2024-11-14-e-SmitsMidbrain-Drug/derived/kilosort2/24432_SmitsMO_D62_sect300_NBQXCPP_150-DIV8_20241114_acqm.zip
+          - s3://braingeneers/ephys/2024-11-14-e-SmitsMidbrain-Drug/derived/kilosort2/24481_SmitsMO_D62_sect300_BASELINE_Control-DIV8_20241114_acqm.zip
+          - s3://braingeneers/ephys/2024-11-14-e-SmitsMidbrain-Drug/derived/kilosort2/24481_SmitsMO_D62_sect300_GABA_Control-DIV8_20241114_acqm.zip
+          - s3://braingeneers/ephys/2024-11-14-e-SmitsMidbrain-Drug/derived/kilosort2/24481_SmitsMO_D62_sect300_NBQXCPP_Control-DIV8_20241114_acqm.zip
+          - s3://braingeneers/ephys/2024-11-14-e-SmitsMidbrain-Drug/derived/kilosort2/24578_SmitsMO_D62_sect300_BASELINE_175-DIV8_20241114_acqm.zip
+          - s3://braingeneers/ephys/2024-11-14-e-SmitsMidbrain-Drug/derived/kilosort2/24578_SmitsMO_D62_sect300_GABA_175-DIV8_20241114_acqm.zip
+          - s3://braingeneers/ephys/2024-11-14-e-SmitsMidbrain-Drug/derived/kilosort2/24578_SmitsMO_D62_sect300_NBQXCPP_175-DIV8_20241114_acqm.zip
+          - s3://braingeneers/ephys/2024-11-14-e-SmitsMidbrain-Drug/derived/kilosort2/
+          - --pca
+          - --cleanup
+        env:
+          - name: "PYTHONUNBUFFERED"
+            value: "true"
+
+          # Ceph (internal)
+          - name: "ENDPOINT_URL"
+            value: "https://s3.braingeneers.gi.ucsc.edu"  # ceph internal
+          - name: "S3_ENDPOINT"
+            value: "s3.braingeneers.gi.ucsc.edu" # ceph internal
+
+        volumeMounts:
+
+          # Ceph credentials
+          - name: "prp-s3-credentials"
+            mountPath: "/root/.aws/credentials"
+            subPath: "credentials"
+
+      restartPolicy: Never
+      volumes:
+        # Secrets file for nautilus s3 credentials .aws/credentials and .s3cfg
+        - name: prp-s3-credentials
+          secret:
+            secretName: prp-s3-credentials
+        - name: ephemeral
+          emptyDir: {}
