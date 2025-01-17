@@ -1,5 +1,6 @@
 import argparse
 import braingeneers.utils.s3wrangler as wr
+import collections
 from datetime import datetime
 import gc
 import itertools
@@ -18,9 +19,8 @@ import zipfile
 
 
 
-
 class SpikeDataAnalysis:
-    def __init__(self, input_path):
+    def __init__(self, input_path, original_paths=None):
         # input_path to be a single string or a list of strings
         if isinstance(input_path, str):
             self.input_paths = [input_path]
@@ -29,8 +29,12 @@ class SpikeDataAnalysis:
         else:
             raise ValueError("input_path must be a string or a list of strings.")
         
+        #reference_paths needed for zip file upload naming
+        # use original_paths for naming if provided; otherwise fall back to local_paths
+        reference_paths = original_paths if original_paths is not None else self.input_paths
+
         #generate original and cleaned names
-        self.original_names = [os.path.splitext(os.path.basename(path))[0] for path in self.input_paths]
+        self.original_names = [os.path.splitext(os.path.basename(path))[0] for path in reference_paths]
         self.cleaned_names = [self.clean_name(name, self.original_names) for name in self.original_names]
 
         # initialize lists for multi-dataset support
@@ -56,6 +60,7 @@ class SpikeDataAnalysis:
 
     def load_and_prepare_data(self, input_path):
         # Check if the file is a .zip containing one .npz
+        print(f"Processing input_path: {input_path}")  # debugging
         if zipfile.is_zipfile(input_path):
             with tempfile.TemporaryDirectory() as tmp_dir:
                 with zipfile.ZipFile(input_path, 'r') as zip_ref:
@@ -2142,7 +2147,7 @@ def main():
         local_input_paths.append(local_file)
 
     # run analysis
-    analysis = SpikeDataAnalysis(input_s3)
+    analysis = SpikeDataAnalysis(local_input_paths, original_paths=input_s3)
     combined_name = "_".join(analysis.cleaned_names[:2])  # use original (cleaned) names for combined_name
 
     # create local temporary directories for processing
