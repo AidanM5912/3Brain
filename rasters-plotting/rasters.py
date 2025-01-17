@@ -118,8 +118,6 @@ class SpikeDataAnalysis:
         return cleaned_name if cleaned_name else base_name
 
 
-
-
     @staticmethod
     def get_population_fr(train, bin_size=0.1, sigma=5, smoothing=True):
         """
@@ -209,9 +207,6 @@ class SpikeDataAnalysis:
                 plt.tight_layout()
                 plt.savefig(plot_filename)
                 plt.close(fig)
-
-
-
 
     def raster_plot(self, output_path, dataset_name):
         print(f"Plotting raster plot for {dataset_name}")
