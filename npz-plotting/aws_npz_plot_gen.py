@@ -30,7 +30,7 @@ class SpikeDataAnalysis:
             raise ValueError("input_path must be a string or a list of strings.")
         
         #generate original and cleaned names
-        self.original_names = [os.path.basename(path) for path in self.input_paths]
+        self.original_names = [os.path.splitext(os.path.basename(path))[0] for path in self.input_paths]
         self.cleaned_names = [self.clean_name(name, self.original_names) for name in self.original_names]
 
         # initialize lists for multi-dataset support
@@ -1909,6 +1909,83 @@ class SpikeDataAnalysis:
         plt.savefig(os.path.join(comparison_dir, "comparison_neuron_participation.png"))
         plt.close()
 
+    def plot_neuron_status_overlay(self, output_path, dataset_names):
+        """
+        Overlay footprint plots showing neuron presence, recovery, loss, and uniqueness across datasets.
+        
+        Parameters:
+            output_path (str): Path to save the generated plot.
+            dataset_names (list): Names of the datasets in chronological order.
+        """
+        from collections import defaultdict
+
+        print("Generating neuron status overlay plot...")
+        plt.close('all')
+
+        # initialize neuron position tracking
+        position_map = defaultdict(list)
+        total_counts = []
+
+        # build the position map
+        for day_index, neuron_data in enumerate(self.neuron_data_list):
+            for neuron_id, neuron_info in neuron_data.items():
+                position = tuple(neuron_info['position'])
+                position_map[position].append(day_index)
+            total_counts.append(len(neuron_data))
+
+        # categorize neurons
+        all_days = set(range(len(self.neuron_data_list)))
+        neuron_categories = {
+            "Present in All": [],
+            "Lost": [],
+            "Recovered": [],
+            "Unique": []
+        }
+
+        for position, days_present in position_map.items():
+            days_present_set = set(days_present)
+            if days_present_set == all_days:
+                neuron_categories["Present in All"].append(position)
+            elif days_present_set < all_days and max(days_present_set) < len(all_days) - 1:
+                neuron_categories["Lost"].append(position)
+            elif len(days_present_set) > 1 and min(days_present_set) > 0:
+                neuron_categories["Recovered"].append(position)
+            elif len(days_present_set) == 1:
+                neuron_categories["Unique"].append(position)
+
+        # plot neurons with color coding
+        plt.figure(figsize=(12, 10))
+        color_map = {
+            "Present in All": "green",
+            "Lost": "red",
+            "Recovered": "blue",
+            "Unique": "orange"
+        }
+
+        for category, positions in neuron_categories.items():
+            positions = np.array(positions)
+            if len(positions) > 0:
+                plt.scatter(positions[:, 0], positions[:, 1], label=f"{category} ({len(positions)})",
+                            color=color_map[category], alpha=0.6, edgecolors='k')
+
+        # add title, labels, and legend
+        plt.title("Neuron Status Overlay Across Datasets", fontsize=16)
+        plt.xlabel(r"Horizontal Position ($\mu$m)", fontsize=14)
+        plt.ylabel(r"Vertical Position ($\mu$m)", fontsize=14)
+        plt.legend(title="Neuron Status", fontsize=12, title_fontsize=12)
+
+        # add total neuron count for each day as text at the bottom
+        text_lines = [f"Day {i + 1} ({name}): {count} neurons"
+                    for i, (name, count) in enumerate(zip(dataset_names, total_counts))]
+        plt.figtext(0.1, 0.01, "\n".join(text_lines), fontsize=10, ha="left", va="bottom", wrap=True)
+
+        # save plot
+        output_file = os.path.join(output_path, "neuron_status_overlay.png")
+        plt.tight_layout()
+        plt.savefig(output_file)
+        plt.close()
+        print(f"Neuron status overlay plot saved to {output_file}")
+
 
     def run_all_analyses(self, output_folder, base_names, perform_pca=False, cleanup=True):
         """
@@ -2065,8 +2142,8 @@ def main():
         local_input_paths.append(local_file)
 
     # run analysis
-    analysis = SpikeDataAnalysis(local_input_paths)
-    combined_name = "_".join(analysis.original_names[:2])  # Use original names for combined_name
+    analysis = SpikeDataAnalysis(input_s3)
+    combined_name = "_".join(analysis.cleaned_names[:2])  # use original (cleaned) names for combined_name
 
     # create local temporary directories for processing
     local_output_folder = f'/tmp/output_plots_{combined_name}'
