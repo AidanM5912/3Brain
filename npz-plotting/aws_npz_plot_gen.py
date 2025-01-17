@@ -178,10 +178,10 @@ class SpikeDataAnalysis:
             legend_rates = np.percentile(firing_rates, [50, 75, 90, 98])
 
             plt.figure(figsize=(11, 9))
-            plt.scatter(neuron_x, neuron_y, s=firing_rates * 100, alpha=0.4, c='r', edgecolors='none')
+            plt.scatter(neuron_x, neuron_y, s=firing_rates * 1800, alpha=0.4, c='r', edgecolors='none')
         
             for rate in legend_rates:
-                plt.scatter([], [], s=rate * 100, c='r', alpha=0.4, label=f'{rate:.2f} kHz')
+                plt.scatter([], [], s=rate * 1800, c='r', alpha=0.4, label=f'{rate:.2f} kHz')
 
             plt.legend(scatterpoints=1, frameon=True, labelspacing=1.4, handletextpad=0.8, borderpad=0.92, title='Firing Rate', loc = 'best', title_fontsize=10, fontsize=10)
             plt.xlabel(r"Horizontal Position ($\mu$m)")
