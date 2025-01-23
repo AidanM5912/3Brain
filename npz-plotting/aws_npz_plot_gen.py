@@ -905,10 +905,10 @@ class SpikeDataAnalysis:
             legend_rates = np.percentile(sttc_sums, [50, 75, 90, 98])
 
             plt.figure(figsize=(11, 9))
-            plt.scatter(neuron_x, neuron_y, s=sttc_marker_size * 100, alpha=0.4, c='r', edgecolors='none')
+            plt.scatter(neuron_x, neuron_y, s=sttc_marker_size * 50, alpha=0.4, c='r', edgecolors='none')
         
             for rate in legend_rates:
-                plt.scatter([], [], s=rate * 100, c='r', alpha=0.4, label=f'STTC Sum {rate /100:.2f}')
+                plt.scatter([], [], s=rate * 50, c='r', alpha=0.4, label=f'STTC Sum {rate /100:.2f}')
 
             plt.legend(scatterpoints=1, frameon=True, labelspacing=1.4, handletextpad=0.8, borderpad=0.92, title='STTC Sum', loc = 'best', title_fontsize=10, fontsize=10, )
             plt.xlabel(r"Horizontal Position ($\mu$m)")
@@ -949,7 +949,7 @@ class SpikeDataAnalysis:
 
                 # Use logarithmic bins if appropriate
                 bins = np.logspace(np.log10(1), np.log10(max(inverse_isi)), 50)  # Logarithmic bins
-                plt.hist(inverse_isi, bins=bins, alpha=0.5, label=base_names[i], density=True)
+                plt.hist(inverse_isi, bins=bins, alpha=0.5, label=self.cleaned_names[i], density=True)
                 plt.xscale('log')  # Set x-axis to logarithmic scale
 
         plt.xlabel("Normalized Instantaneous Firing Rate (Hz/neuron)")
@@ -973,7 +973,7 @@ class SpikeDataAnalysis:
                 intervals = np.diff(neuron_spikes)
                 if len(intervals) > 0:
                     all_intervals.extend(intervals)
-            plt.hist(all_intervals, bins=100, alpha=0.5, label=base_names[i], density=True)
+            plt.hist(all_intervals, bins=100, alpha=0.5, label=self.cleaned_names[i], density=True)
 
         plt.xlabel("Inter-Spike Interval (s)")
         plt.ylabel("Density")
@@ -1922,13 +1922,13 @@ class SpikeDataAnalysis:
         plt.savefig(os.path.join(comparison_dir, "comparison_neuron_participation.png"))
         plt.close()
 
-    def plot_neuron_status_overlay(self, output_path, dataset_names):
+    def plot_neuron_status_overlay(self, output_path, cleaned_names):
         """
-        Overlay footprint plots showing neuron presence, recovery, loss, and uniqueness across datasets.
+        overlay footprint plots showing neuron presence, recovery, loss, and uniqueness across datasets.
         
-        Parameters:
-            output_path (str): Path to save the generated plot.
-            dataset_names (list): Names of the datasets in chronological order.
+        parameters:
+            output_path (str): path to save the generated plot.
+            cleaned_names (list): cleaned names of the datasets in chronological order.
         """
         from collections import defaultdict
 
@@ -1939,19 +1939,22 @@ class SpikeDataAnalysis:
         position_map = defaultdict(list)
         total_counts = []
 
-        # build the position map
+        # build position map for each day's neuron data
         for day_index, neuron_data in enumerate(self.neuron_data_list):
             for neuron_id, neuron_info in neuron_data.items():
                 position = tuple(neuron_info['position'])
                 position_map[position].append(day_index)
             total_counts.append(len(neuron_data))
 
-        # categorize neurons
-        all_days = set(range(len(self.neuron_data_list)))
+        total_days = len(self.neuron_data_list)
+        all_days = set(range(total_days))
+
+        # categorize neurons with refined logic
         neuron_categories = {
             "Present in All": [],
-            "Lost": [],
+            "Lost (never returned)": [],
             "Recovered": [],
+            "Newly Appeared": [],
             "Unique": []
         }
 
@@ -1959,45 +1962,124 @@ class SpikeDataAnalysis:
             days_present_set = set(days_present)
             if days_present_set == all_days:
                 neuron_categories["Present in All"].append(position)
-            elif days_present_set < all_days and max(days_present_set) < len(all_days) - 1:
-                neuron_categories["Lost"].append(position)
-            elif len(days_present_set) > 1 and min(days_present_set) > 0:
-                neuron_categories["Recovered"].append(position)
-            elif len(days_present_set) == 1:
+            elif len(days_present_set) == 1 and 0 in days_present_set:
+                neuron_categories["Lost (never returned)"].append(position)
+            elif len(days_present_set) == 1 and 0 not in days_present_set:
                 neuron_categories["Unique"].append(position)
+            elif 0 in days_present_set:
+                neuron_categories["Recovered"].append(position)
+            else:
+                neuron_categories["Newly Appeared"].append(position)
 
         # plot neurons with color coding
-        plt.figure(figsize=(12, 10))
+        plt.figure(figsize=(14, 8))  # increased width of the plot
         color_map = {
             "Present in All": "green",
-            "Lost": "red",
+            "Lost (never returned)": "red",
             "Recovered": "blue",
-            "Unique": "orange"
+            "Newly Appeared": "yellow",
+            "Unique": "purple"
         }
 
         for category, positions in neuron_categories.items():
             positions = np.array(positions)
-            if len(positions) > 0:
-                plt.scatter(positions[:, 0], positions[:, 1], label=f"{category} ({len(positions)})",
-                            color=color_map[category], alpha=0.6, edgecolors='k')
+            if positions.size > 0:
+                plt.scatter(
+                    positions[:, 0], positions[:, 1],
+                    label=f"{category} ({len(positions)})",
+                    color=color_map[category], alpha=0.6, edgecolors='k'
+                )
 
-        # add title, labels, and legend
+        # add main title and axis labels
         plt.title("Neuron Status Overlay Across Datasets", fontsize=16)
         plt.xlabel(r"Horizontal Position ($\mu$m)", fontsize=14)
         plt.ylabel(r"Vertical Position ($\mu$m)", fontsize=14)
+
+        # restore legend within the plot area
         plt.legend(title="Neuron Status", fontsize=12, title_fontsize=12)
 
-        # add total neuron count for each day as text at the bottom
-        text_lines = [f"Day {i + 1} ({name}): {count} neurons"
-                    for i, (name, count) in enumerate(zip(dataset_names, total_counts))]
-        plt.figtext(0.1, 0.01, "\n".join(text_lines), fontsize=10, ha="left", va="bottom", wrap=True)
+        # ======= UPDATED SECTION BEGINS: Simplify dataset names =======
+        simplified_names = []
+        for name in cleaned_names:
+            # remove trailing date and 'acqm' parts
+            name_no_date = re.sub(r'_\d{8}_acqm(\.zip)?$', '', name, flags=re.IGNORECASE)
+
+            # extract day identifier (Dxx) explicitly
+            day_match = re.search(r"(D\d+)", name_no_date, re.IGNORECASE)
+            day_identifier = day_match.group(1).upper() if day_match else ""
+
+            # remove the extracted day and any trailing underscores to form qualifier
+            qualifier_part = name_no_date.replace(day_identifier, "")
+            # remove any leading/trailing underscores and lower-case
+            qualifier = qualifier_part.strip("_").lower()
+
+            # Fallback to just the day identifier if qualifier ends up empty
+            simplified = f"{day_identifier}" if not qualifier else f"{day_identifier}_{qualifier}"
+            simplified_names.append(simplified)
+
+        print("Simplified names after preservation:", simplified_names)
+
+        # sort datasets by chronological order based on Dxx
+        def extract_day_identifier(name):
+            match = re.search(r"d(\d+)", name, re.IGNORECASE)
+            return int(match.group(1)) if match else float('inf')
+
+        sorted_indices = sorted(range(len(simplified_names)), key=lambda i: extract_day_identifier(simplified_names[i]))
+        simplified_names = [simplified_names[i] for i in sorted_indices]
+        total_counts = [total_counts[i] for i in sorted_indices]
+
+        # debug: print sorted names and counts
+        print("Sorted names and neuron counts:", list(zip(simplified_names, total_counts)))
+
+        # create mapping of Dxx and append clarifiers if needed
+        day_groups = defaultdict(list)
+        for name in simplified_names:
+            match = re.match(r"(D\d+)", name, re.IGNORECASE)
+            if match:
+                day = match.group(1).upper()
+                # extract qualifier if present after day identifier
+                qualifier = name[len(match.group(0)):].strip("_")
+                day_groups[day].append(qualifier)
+
+        # generate the final suptitle lines
+        subtitle_lines = []
+        for day, qualifiers in day_groups.items():
+            # filter out empty qualifiers
+            qualifiers = [q for q in qualifiers if q]
+            
+            # if there's only one dataset for the day
+            if len(qualifiers) <= 1:
+                # find index of dataset that starts with the day identifier using uppercase comparison
+                index = next(i for i, name in enumerate(simplified_names) if name.startswith(day))
+                subtitle_lines.append(f"{day}: {total_counts[index]} neurons")
+            else:
+                # compute common tokens among qualifiers to simplify them
+                common_tokens = set.intersection(*(set(q.split('_')) for q in qualifiers if q)) if qualifiers else set()
+                for qual in qualifiers:
+                    # remove common tokens from each qualifier
+                    tokens = [token for token in qual.split('_') if token not in common_tokens]
+                    simplified_qual = "_".join(tokens)
+                    identifier = f"{day}_{simplified_qual}" if simplified_qual else day
+                    # use original full identifier to find index
+                    original_identifier = f"{day}_{qual}" if qual else day
+                    try:
+                        index = simplified_names.index(original_identifier)
+                    except ValueError:
+                        index = None
+                    if index is not None:
+                        subtitle_lines.append(f"{identifier}: {total_counts[index]} neurons")
+
+        # insert line breaks between entries
+        subtitle_text = "\n".join(subtitle_lines)
+
+        # adjust layout to make the plot wider and text tighter
+        plt.tight_layout(rect=[0, 0, 0.85, 1])  # reclaim more space for the plot
+        plt.gcf().text(0.87, 0.5, subtitle_text, fontsize=12, va="center", ha="left", multialignment="left")  # adjusted font size
 
         # save plot
         output_file = os.path.join(output_path, "neuron_status_overlay.png")
-        plt.tight_layout()
-        plt.savefig(output_file)
+        plt.savefig(output_file, bbox_inches='tight')
         plt.close()
-        print(f"Neuron status overlay plot saved to {output_file}")
 
 
     def run_all_analyses(self, output_folder, base_names, perform_pca=False, cleanup=True):
@@ -2049,7 +2131,7 @@ class SpikeDataAnalysis:
             self.plot_raw_population_fr(dataset_dir, dataset_name)
             self.plot_synchrony_index_over_time(dataset_dir, dataset_name)
             self.plot_active_units_per_electrode(dataset_dir, dataset_name)
-            self.plot_electrode_activity_heatmap(dataset_dir, dataset_name)
+            #self.plot_electrode_activity_heatmap(dataset_dir, dataset_name) #need a layout of electrodes for this
             self.plot_sttc_over_time(dataset_dir, dataset_name)
             self.plot_footprint_sttc(dataset_dir, dataset_name)
             self.plot_sttc_log(dataset_dir, dataset_name)
