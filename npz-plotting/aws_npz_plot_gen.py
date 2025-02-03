@@ -18,7 +18,6 @@ import uuid
 import zipfile
 
 
-
 class SpikeDataAnalysis:
     def __init__(self, input_path, original_paths=None):
         # input_path to be a single string or a list of strings
@@ -41,6 +40,7 @@ class SpikeDataAnalysis:
         self.data_list = []
         self.trains = []
         self.firing_rates_list = []
+        self.normalized_firing_rates_list = []
         self.durations = []
         self.neuron_data_list = []
         self.num_neurons_list = []
@@ -54,6 +54,7 @@ class SpikeDataAnalysis:
             self.data = self.data_list[0]
             self.train = self.trains[0]
             self.firing_rates = self.firing_rates_list[0]
+            self.normalized_firing_rates_list = self.normalized_firing_rates_list[0]
             self.duration = self.durations[0]
             self.neuron_data = self.neuron_data_list[0]
             self.number_of_neurons = self.num_neurons_list[0]
@@ -99,7 +100,7 @@ class SpikeDataAnalysis:
             self.trains.append(train)
             self.durations.append(max([max(times) for times in train]))
             firing_rates = [len(neuron_spikes) / max([max(times) for times in train]) for neuron_spikes in train]
-            firing_rates = [rate / len(train) for rate in firing_rates]  # normalize by the total number of neurons
+            normalized_firing_rates = [rate / len(train) for rate in firing_rates]  # normalize by the total number of neurons
             self.firing_rates_list.append(firing_rates)
             self.neuron_data_list.append(data.get("neuron_data", {}).item())
             self.num_neurons_list.append(len(train))
@@ -133,9 +134,11 @@ class SpikeDataAnalysis:
 
 
 
-    def raster_plot(self, output_path, dataset_name):
-        print(f"Plotting raster plot for {dataset_name}")
+    def raster_plot(self, output_path):
         for i, train in enumerate(self.trains):
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting raster plot for {dataset_name}")
+
             fig, ax = plt.subplots(figsize=(10, 8))
             y = 0
             for vv in train:
@@ -160,10 +163,12 @@ class SpikeDataAnalysis:
             plt.savefig(os.path.join(output_path, f"raster_{dataset_name}.png"))
             plt.close(fig)
 
-    def footprint_overlay_fr(self, output_path, dataset_name):
-        print(f"Plotting footprint overlay with firing rates for {dataset_name}")
+    def footprint_overlay_fr(self, output_path):
         plt.close('all')
         for i, neuron_data in enumerate(self.neuron_data_list):
+
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting footprint overlay with firing rates for {dataset_name}")
 
             neuron_x, neuron_y, firing_rates = [], [], []
 
@@ -227,10 +232,11 @@ class SpikeDataAnalysis:
             return bins[1:], fr_normalized #bin centers and normalizied firing rate
 
 
-    def plot_smoothed_population_fr(self, output_path, dataset_name):
-        print(f"Plotting smoothed population firing rate for {dataset_name}")
+    def plot_smoothed_population_fr(self, output_path):
         plt.close('all')
         for i, train in enumerate(self.trains):
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting smoothed population firing rate{dataset_name}")
 
             bins, fr_avg = self.get_population_fr(train, smoothing=True)
 
@@ -247,10 +253,10 @@ class SpikeDataAnalysis:
             plt.savefig(os.path.join(output_path, f"smoothed_population_fr_{dataset_name}.png"))
             plt.close()
 
-    def overlay_fr_raster(self, output_path, dataset_name):
+    def overlay_fr_raster(self, output_path):
         plt.close('all')
         for i, train in enumerate(self.trains):
-
+            dataset_name = self.cleaned_names[i]
             bins, fr_avg = self.get_population_fr(train, smoothing=True)
 
             fig, axs = plt.subplots(1, 1, figsize=(16, 6))
@@ -400,10 +406,13 @@ class SpikeDataAnalysis:
 
         return {'close': list(close_indices), 'distant': list(distant_indices)}
 
-    def sttc_plot(self, output_path, dataset_name):
-        print(f"Plotting STTC matrix for {dataset_name}")
+    def sttc_plot(self, output_path):
         plt.close('all')
         for i, train in enumerate(self.trains):
+
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting STTC matrix for {dataset_name}")
+
             matrix = self.compute_sttc_matrix(train, self.durations[i])
 
             plt.figure(figsize=(10, 8))
@@ -422,13 +431,15 @@ class SpikeDataAnalysis:
             plt.savefig(os.path.join(output_path, f"sttc_heatmap_{dataset_name}.png"))
             plt.close()
 
-    def sttc_violin_plot_by_firing_rate_individual(self, output_path, dataset_name):
+    def sttc_violin_plot_by_firing_rate_individual(self, output_path):
         #generate STTC violin plots for an individual dataset by firing rate.
-        print(f"Generating STTC violin plots by firing rate for {dataset_name}")
+        
         plt.close('all')
 
         for i, train in enumerate(self.trains):
-            groups, low_threshold, high_threshold = self.group_neurons_by_firing_rate(self.firing_rates_list[i])
+            dataset_name = self.cleaned_names[i]
+            print(f"Generating STTC violin plots by firing rate for {dataset_name}")
+            groups, low_threshold, high_threshold = self.group_neurons_by_firing_rate(self.normalized_firing_rates_list[i])
             sttc_values = []
             labels = []
 
@@ -443,28 +454,28 @@ class SpikeDataAnalysis:
                     labels.append(f"High (≥{high_threshold:.2f} Hz)")
 
 
-        # do the violin plot
-        plt.figure(figsize=(12, 8))
-        plt.violinplot(sttc_values, showmeans=True)
-        plt.xticks(ticks=np.arange(1, len(labels) + 1), labels=labels, rotation=45, ha='right')
-        plt.xlabel('Firing Rate Group')
-        plt.ylabel('STTC Values')
-        plt.title(f'STTC Violin Plot by Firing Rate: {dataset_name}')
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_path, f"sttc_violin_plot_by_firing_rate_{dataset_name}.png"))
-        plt.close()
+            # do the violin plot
+            plt.figure(figsize=(12, 8))
+            plt.violinplot(sttc_values, showmeans=True)
+            plt.xticks(ticks=np.arange(1, len(labels) + 1), labels=labels, rotation=45, ha='right')
+            plt.xlabel('Firing Rate Group')
+            plt.ylabel('STTC Values')
+            plt.title(f'STTC Violin Plot by Firing Rate: {dataset_name}')
+            plt.tight_layout()
+            plt.savefig(os.path.join(output_path, f"sttc_violin_plot_by_firing_rate_{dataset_name}.png"))
+            plt.close()
 
-    def sttc_violin_plot_by_firing_rate_compare(self, output_path, dataset_names):
+    def sttc_violin_plot_by_firing_rate_compare(self, output_path):
         #generate a combined STTC violin plot by firing rate across multiple datasets.
-        print(f"Generating combined STTC violin plots by firing rate for {dataset_names}")
+        print(f"Generating combined STTC violin plots by firing rate for all datasets")
         plt.close('all')
 
         combined_sttc_values = []
         combined_labels = []
 
         for i, train in enumerate(self.trains):
-            dataset_name = dataset_names[i]
-            groups, low_threshold, high_threshold = self.group_neurons_by_firing_rate(self.firing_rates_list[i])
+            dataset_name = self.cleaned_names[i]
+            groups, low_threshold, high_threshold = self.group_neurons_by_firing_rate(self.normalized_firing_rates_list[i])
 
             for group_name, indices in groups.items():
                 sttc_matrix = self.compute_sttc_matrix([train[j] for j in indices], self.durations[i])
@@ -476,9 +487,7 @@ class SpikeDataAnalysis:
                 elif group_name == 'high':
                     combined_labels.append(f"{dataset_name} - High (≥{high_threshold:.2f} Hz)")
 
-
-
-        # Generate the violin plot
+        # generate violin plot
         plt.figure(figsize=(12, 8))
         plt.violinplot(combined_sttc_values, showmeans=True)
         plt.xticks(ticks=np.arange(1, len(combined_labels) + 1), labels=combined_labels, rotation=45, ha='right')
@@ -489,7 +498,7 @@ class SpikeDataAnalysis:
         plt.savefig(os.path.join(output_path, f"sttc_violin_plot_by_firing_rate_combined.png"))
         plt.close()
 
-    def sttc_violin_plot_by_proximity_individual(self, output_path, dataset_name, distance_threshold=100):
+    def sttc_violin_plot_by_proximity_individual(self, output_path, distance_threshold=100):
         """
         Generate STTC violin plots for an individual dataset by proximity.
 
@@ -498,11 +507,14 @@ class SpikeDataAnalysis:
             dataset_name (str): Name of the dataset.
             distance_threshold (int): Threshold for proximity grouping.
         """
-        print(f"Generating STTC violin plots by proximity for {dataset_name}")
         plt.close('all')
 
-        # Find the index of the dataset
+        # find index of the dataset
         for i, train in enumerate(self.trains):
+            
+            dataset_name = self.cleaned_names[i]
+            print(f"Generating STTC violin plots by proximity for {dataset_name}")
+
             neuron_data = self.neuron_data_list[i]
             groups = self.group_neurons_by_proximity(neuron_data, distance_threshold)
             sttc_values = []
@@ -515,18 +527,18 @@ class SpikeDataAnalysis:
                 sttc_values.append(self.get_upper_triangle_values(sttc_matrix))
                 labels.append(f"{group_name.capitalize()}")
 
-        # Generate the violin plot
-        plt.figure(figsize=(12, 8))
-        plt.violinplot(sttc_values, showmeans=True)
-        plt.xticks(ticks=np.arange(1, len(labels) + 1), labels=labels, rotation=45, ha='right')
-        plt.xlabel('Proximity Group')
-        plt.ylabel('STTC Values')
-        plt.title(f'STTC Violin Plot by Spatial Proximity: {dataset_name} (Proximity ≤ {distance_threshold} μm)')
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_path, f"sttc_violin_plot_by_proximity_{dataset_name}.png"))
-        plt.close()
+            # generate the violin plot
+            plt.figure(figsize=(12, 8))
+            plt.violinplot(sttc_values, showmeans=True)
+            plt.xticks(ticks=np.arange(1, len(labels) + 1), labels=labels, rotation=45, ha='right')
+            plt.xlabel('Proximity Group')
+            plt.ylabel('STTC Values')
+            plt.title(f'STTC Violin Plot by Spatial Proximity: {dataset_name} (Proximity ≤ {distance_threshold} μm)')
+            plt.tight_layout()
+            plt.savefig(os.path.join(output_path, f"sttc_violin_plot_by_proximity_{dataset_name}.png"))
+            plt.close()
 
-    def sttc_violin_plot_by_proximity_compare(self, output_path, dataset_names, distance_threshold=100):
+    def sttc_violin_plot_by_proximity_compare(self, output_path, distance_threshold=100):
         """
         Generate a combined STTC violin plot by proximity across multiple datasets.
 
@@ -535,14 +547,14 @@ class SpikeDataAnalysis:
             dataset_names (list): Names of datasets for comparison.
             distance_threshold (int): Threshold for proximity grouping.
         """
-        print(f"Generating combined STTC violin plots by proximity for {dataset_names}")
+        print(f"Generating combined STTC violin plots by proximity for all datasets")
         plt.close('all')
 
         combined_sttc_values = []
         combined_labels = []
 
         for i, train in enumerate(self.trains):
-            dataset_name = dataset_names[i]
+            dataset_name = self.cleaned_names[i]
             neuron_data = self.neuron_data_list[i]
             groups = self.group_neurons_by_proximity(neuron_data, distance_threshold)
 
@@ -565,7 +577,7 @@ class SpikeDataAnalysis:
         plt.close()
 
 
-    def sttc_violin_plot_across_recordings(self, output_path, dataset_names):
+    def sttc_violin_plot_across_recordings(self, output_path):
         print("Generating STTC violin plot across recordings")
         plt.close('all')
         if len(self.input_paths) < 2:
@@ -579,7 +591,7 @@ class SpikeDataAnalysis:
             sttc_matrix = self.compute_sttc_matrix(train, duration)
             sttc_values = self.get_upper_triangle_values(sttc_matrix)
             sttc_values_list.append(sttc_values)
-            labels.append(dataset_names[i])
+            labels.append(self.cleaned_names[i])
 
         plt.figure(figsize=(12, 8))
         plt.violinplot(sttc_values_list, showmeans=True)
@@ -591,10 +603,13 @@ class SpikeDataAnalysis:
         plt.savefig(os.path.join(output_path, f"sttc_violin_plot_across_recordings.png"))
         plt.close()
 
-    def plot_firing_rate_histogram(self, output_path, dataset_name):
-        print(f"Plotting firing rate histogram for {dataset_name}")
+    def plot_firing_rate_histogram(self, output_path):
         plt.close('all')
-        for i, firing_rates in enumerate(self.firing_rates_list):
+        for i, firing_rates in enumerate(self.normalized_firing_rates_list):
+
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting firing rate histogram for {dataset_name}")
+
             plt.figure(figsize=(12, 6))
             plt.hist(firing_rates, bins=50, color='green', alpha=0.7)
             plt.xlabel('Firing Rate (Hz)')
@@ -604,10 +619,11 @@ class SpikeDataAnalysis:
             plt.savefig(os.path.join(output_path, f"firing_rate_histogram_{dataset_name}.png"))
             plt.close()
 
-    def plot_firing_rate_cdf(self, output_path, dataset_name):
-        print(f"Plotting firing rate CDF for {dataset_name}")
+    def plot_firing_rate_cdf(self, output_path):
         plt.close('all')
-        for i, firing_rates in enumerate(self.firing_rates_list):
+        for i, firing_rates in enumerate(self.normalized_firing_rates_list):
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting firing rate CDF for {dataset_name}")
             sorted_firing_rates = np.sort(firing_rates)
             cdf = np.arange(len(sorted_firing_rates)) / float(len(sorted_firing_rates))
         
@@ -620,8 +636,7 @@ class SpikeDataAnalysis:
             plt.savefig(os.path.join(output_path, f"firing_rate_cdf_{dataset_name}.png"))
             plt.close()
 
-    def plot_isi_histogram(self, output_path, dataset_name, bins=50, log_scale=False, xlim=None, kde=False):
-        print(f"Plotting ISI histogram for {dataset_name}")
+    def plot_isi_histogram(self, output_path, bins=50, log_scale=False, xlim=None, kde=False):
         """
         Plot the ISI histogram for a dataset with enhancements.
 
@@ -636,53 +651,52 @@ class SpikeDataAnalysis:
         plt.close('all')
 
         for i, train in enumerate(self.trains):
-            # Collect all ISI values
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting ISI histogram for {dataset_name}")
+            # collect all ISI values
             all_intervals = []
             for neuron_spikes in train:
                 all_intervals.extend(np.diff(neuron_spikes))
 
-            # Filter ISI values based on xlim
+            # filter ISI values based on xlim
             if xlim:
                 all_intervals = [isi for isi in all_intervals if xlim[0] <= isi <= xlim[1]]
 
-            # Create histogram
+            # create histogram
             plt.figure(figsize=(12, 6))
             if log_scale:
-                # Use logarithmic bins if log_scale is True
+                # use logarithmic bins if log_scale is True
                 bins = np.logspace(np.log10(min(all_intervals) + 1e-6), np.log10(max(all_intervals)), bins)
                 plt.xscale('log')
             else:
-                # Use linear bins (adjusted to xlim if specified)
+                # use linear bins (adjusted to xlim if specified)
                 bins = np.linspace(xlim[0], xlim[1], bins) if xlim else bins
 
             plt.hist(all_intervals, bins=bins, color='red', alpha=0.7, label='Histogram')
 
-            # Add KDE if enabled
+            # add KDE if enabled
             if kde:
                 from scipy.stats import gaussian_kde
                 density = gaussian_kde(all_intervals)
                 xs = np.linspace(min(all_intervals), max(all_intervals), 500)
                 plt.plot(xs, density(xs), color='blue', label='KDE')
 
-            # Set x-axis limits
+            # set x-axis limits
             if xlim:
-                plt.xlim(xlim)  # Explicitly set the x-axis range
+                plt.xlim(xlim)  # explicitly set the x-axis range
 
-            # Labels and title
+            # labels and title
             plt.xlabel('Inter-Spike Interval (s)')
             plt.ylabel('Count')
             plt.title(f'ISI Histogram: {dataset_name}')
             plt.legend()
             plt.tight_layout()
-
-            # Save the plot
             plt.savefig(os.path.join(output_path, f"isi_histogram_{dataset_name}_log_{log_scale}.png"))
             plt.close()
 
 
 
-    def plot_cv_of_isi(self, output_path, dataset_name, bins=50, xlim=None, kde=False):
-        print(f"Plotting Coefficient of Variation of ISI for {dataset_name}")
+    def plot_cv_of_isi(self, output_path, bins=50, xlim=None, kde=False):
         """
         Plot the histogram of the Coefficient of Variation (CV) of ISI values.
 
@@ -696,7 +710,9 @@ class SpikeDataAnalysis:
         plt.close('all')
 
         for i, train in enumerate(self.trains):
-            # Calculate CV values
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting CV of ISI histogram for {dataset_name}")
+            # calculate CV values
             cv_values = []
             for neuron_spikes in train:
                 intervals = np.diff(neuron_spikes)
@@ -704,51 +720,50 @@ class SpikeDataAnalysis:
                     cv = np.std(intervals) / np.mean(intervals)  # CV: std/mean
                     cv_values.append(cv)
 
-            # Filter CV values based on xlim
+            # filter CV values based on xlim
             if xlim:
                 cv_values = [cv for cv in cv_values if xlim[0] <= cv <= xlim[1]]
 
-            # Create histogram
+            # create histogram
             plt.figure(figsize=(12, 6))
-            bins = np.linspace(xlim[0], xlim[1], bins) if xlim else bins  # Adjust bins to range
+            bins = np.linspace(xlim[0], xlim[1], bins) if xlim else bins  # asdjust bins to range
             plt.hist(cv_values, bins=bins, color='orange', alpha=0.7, label='Histogram')
 
-            # Add KDE if enabled
+            # add KDE if enabled
             if kde:
                 from scipy.stats import gaussian_kde
                 density = gaussian_kde(cv_values)
                 xs = np.linspace(min(cv_values), max(cv_values), 500)
                 plt.plot(xs, density(xs), color='blue', label='KDE')
 
-            # Set x-axis limits if specified
+            # set x-axis limits if specified
             if xlim:
                 plt.xlim(xlim)
 
-            # Labels and title
+            # labels and title
             plt.xlabel('Coefficient of Variation (CV)')
             plt.ylabel('Count')
             plt.title(f'Coefficient of Variation of ISI: {dataset_name}')
             plt.tight_layout()
 
-            # Save the plot
+            # save the plot
             plt.savefig(os.path.join(output_path, f"cv_of_isi_{dataset_name}.png"))
             plt.close()
 
-    def plot_raw_population_fr(self, output_path, dataset_name, bin_size=1.0):
-        print(f"Plotting raw population firing rate for {dataset_name}")
+    def plot_raw_population_fr(self, output_path, bin_size=1.0):
         plt.close('all')
         for i, train in enumerate(self.trains):
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting raw population firing rate for {dataset_name}")
             combined_train = np.hstack(train)
             max_time = np.max(combined_train)
             bins = np.arange(0, max_time + bin_size, bin_size)
             firing_rate, _ = np.histogram(combined_train, bins=bins)
 
-
-             # Normalize by the number of neurons
+             # normalize by the number of neurons
             num_neurons = len(train)
             if num_neurons > 0:
                 firing_rate = firing_rate / num_neurons  # Normalize firing rate per neuron
-
 
             plt.figure(figsize=(12, 6))
             plt.plot(bins[:-1], firing_rate, color='red')
@@ -759,10 +774,11 @@ class SpikeDataAnalysis:
             plt.savefig(os.path.join(output_path, f"raw_population_fr_{dataset_name}.png"))
             plt.close()
 
-    def plot_synchrony_index_over_time(self, output_path, dataset_name, window_size=10.0):
-        print(f"Plotting synchrony index over time for {dataset_name}")
+    def plot_synchrony_index_over_time(self, output_path, window_size=10.0):
         plt.close('all')
         for i, train in enumerate(self.trains):
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting synchrony index over time for {dataset_name}")
             synchrony_indices = []
             time_points = []
             max_time = np.max(np.hstack(train))
@@ -809,54 +825,11 @@ class SpikeDataAnalysis:
             else:
                 print(f"No valid synchrony data for plotting for dataset: {dataset_name}")
 
-
-    def plot_active_units_per_electrode(self, output_path, dataset_name):
-        print(f"Plotting active units per electrode for {dataset_name}")
-        plt.close('all')
-        for i, neuron_data in enumerate(self.neuron_data_list):
-            electrode_activity = np.zeros(len(neuron_data))
-
-            for j, neuron in enumerate(neuron_data.values()):
-                # check if 'spike_times' key exists and is not empty
-                if 'spike_times' in neuron and neuron['spike_times'] is not None and len(neuron['spike_times']) > 0:
-                    electrode_activity[j] += 1
-
-            plt.figure(figsize=(12, 6))
-            plt.bar(np.arange(len(electrode_activity)), electrode_activity, color='teal')
-            plt.xlabel('Electrode Index')
-            plt.ylabel('Number of Active Units')
-            plt.title(f'Active Units Per Electrode: {dataset_name}')
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_path, f"active_units_per_electrode_{dataset_name}.png"))
-            plt.close()
-
-    def plot_electrode_activity_heatmap(self, output_path, dataset_name):
-        print(f"Plotting electrode activity heatmap for {dataset_name}")
-        plt.close('all')
-        for i, neuron_data in enumerate(self.neuron_data_list):
-            electrode_activity = np.zeros(len(neuron_data))
-
-            for j, neuron in enumerate(neuron_data.values()):
-                # check if 'spike_times' key exists and is not empty
-                if 'spike_times' in neuron and neuron['spike_times'] is not None:
-                    electrode_activity[j] += len(neuron['spike_times'])
-
-            # attempt to create a heatmap without reshaping
-            plt.figure(figsize=(12, 6))
-            plt.imshow([electrode_activity], aspect='auto', cmap='hot', interpolation='nearest')
-            plt.colorbar(label='Activity Level')
-            plt.xlabel('Electrode Index')
-            plt.title(f'Electrode Activity Heatmap: {dataset_name}')
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_path, f"electrode_activity_heatmap_{dataset_name}.png"))
-            plt.close()
-
-
-
-    def plot_sttc_over_time(self, output_path, dataset_name, window_size=10.0):
-        print(f"Plotting STTC over time for {dataset_name}")
+    def plot_sttc_over_time(self, output_path, window_size=10.0):
         plt.close('all')
         for i, train in enumerate(self.trains):
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting STTC over time for {dataset_name}")
             sttc_values = []
             time_points = []
             max_time = np.max(np.hstack(train))
@@ -880,10 +853,11 @@ class SpikeDataAnalysis:
             plt.savefig(os.path.join(output_path, f"sttc_over_time_{dataset_name}.png"))
             plt.close()
     
-    def plot_footprint_sttc(self, output_path, dataset_name):
-        print(f"Plotting footprint plot with STTC for {dataset_name}")
+    def plot_footprint_sttc(self, output_path):
         plt.close('all')
         for i, (train, neuron_data) in enumerate(zip(self.trains, self.neuron_data_list)):
+            dataset_name = self.cleaned_names[i]
+            print(f"Generating footprint plot with STTC for {dataset_name}")
 
             neuron_x, neuron_y, sttc_marker_size = [], [], []
 
@@ -917,7 +891,7 @@ class SpikeDataAnalysis:
             plt.savefig(os.path.join(output_path, f"footprint_plot_sttc_sum_{dataset_name}.png"))
             plt.close()
 
-    def plot_comparison_inverse_isi(self, output_path, base_names):
+    def plot_comparison_inverse_isi(self, output_path):
         """
         Generate and save a comparison overlay plot for population-level inverse ISI for all datasets,
         normalized by the number of neurons.
@@ -931,26 +905,26 @@ class SpikeDataAnalysis:
                 if len(intervals) > 0:
                     all_intervals.extend(intervals)
 
-            # Remove zero intervals before calculating inverse ISI
+            # remove zero intervals before calculating inverse ISI
             all_intervals = np.array(all_intervals)
-            all_intervals = all_intervals[all_intervals > 0]  # Exclude zero or negative intervals
+            all_intervals = all_intervals[all_intervals > 0]  # exclude zero or negative intervals
 
             if len(all_intervals) > 0:
                 inverse_isi = 1 / all_intervals
-                inverse_isi = inverse_isi[np.isfinite(inverse_isi)]  # Exclude any infinities
+                inverse_isi = inverse_isi[np.isfinite(inverse_isi)]  # exclude any infinities
                 
-                # Normalize by the number of neurons in the dataset
+                # normalize by the number of neurons in the dataset
                 num_neurons = len(train)
                 if num_neurons > 0:
-                    inverse_isi /= num_neurons  # Normalize firing rate
+                    inverse_isi /= num_neurons  # normalize firing rate
 
-                # Apply clipping to remove extreme outliers
-                inverse_isi = inverse_isi[inverse_isi < 1000]  # Exclude values above 1000 Hz
+                # apply clipping to remove extreme outliers
+                inverse_isi = inverse_isi[inverse_isi < 1000]  # exclude values above 1000 Hz
 
-                # Use logarithmic bins if appropriate
-                bins = np.logspace(np.log10(1), np.log10(max(inverse_isi)), 50)  # Logarithmic bins
+                # use logarithmic bins if appropriate
+                bins = np.logspace(np.log10(1), np.log10(max(inverse_isi)), 50)  # logarithmic bins
                 plt.hist(inverse_isi, bins=bins, alpha=0.5, label=self.cleaned_names[i], density=True)
-                plt.xscale('log')  # Set x-axis to logarithmic scale
+                plt.xscale('log')  # set x-axis to logarithmic scale
 
         plt.xlabel("Normalized Instantaneous Firing Rate (Hz/neuron)")
         plt.ylabel("Density")
@@ -961,7 +935,7 @@ class SpikeDataAnalysis:
         plt.close()
 
 
-    def plot_comparison_regular_isi(self, output_path, base_names):
+    def plot_comparison_regular_isi(self, output_path):
         """
         Generate and save a comparison overlay plot for regular ISI histograms for all datasets.
         """
@@ -983,7 +957,7 @@ class SpikeDataAnalysis:
         plt.savefig(os.path.join(output_path, "comparison_regular_isi.png"))
         plt.close()
 
-    def find_neuron_of_interest(self, dataset_index=0):
+    def find_neuron_of_interest(self):
         """
         Identify the neuron of interest based on composite ranking criteria.
         Criteria: 
@@ -995,57 +969,54 @@ class SpikeDataAnalysis:
         Returns:
             The index of the "neuron of interest."
         """
-        print(f"Finding neuron of interest for dataset {dataset_index}")
-        if dataset_index >= len(self.trains):
-            print(f"Dataset index {dataset_index} out of bounds.")
-            print(f"Dataset index {dataset_index} out of bounds. Total datasets: {len(self.trains)}")
-            return None
-        print(f"Dataset {dataset_index} has {len(self.trains[dataset_index])} neurons and duration {self.durations[dataset_index]}.")
-
-        train = self.trains[dataset_index]
-        firing_rates = self.firing_rates_list[dataset_index]
-        duration = self.durations[dataset_index]
-
-        if len(train) == 0 or len(firing_rates) == 0:
-            print("No neurons in dataset.")
-            return None
-
-        # initialize rank arrays
-        num_neurons = len(train)
-        firing_rate_ranks = np.argsort(-np.array(firing_rates))  # descending order
-        isi_cvs = []
-        burst_scores = []
-        sttc_ranks = np.zeros(num_neurons)
-
-        # compute ISI CV
-        for neuron_spikes in train:
-            intervals = np.diff(neuron_spikes)
-            if len(intervals) > 1:
-                isi_cvs.append(np.std(intervals) / np.mean(intervals))  # CV = std/mean
-            else:
-                isi_cvs.append(np.inf)
-        isi_cv_ranks = np.argsort(isi_cvs)
-
-        # compute burst tendency
-        for neuron_spikes in train:
-            intervals = np.diff(neuron_spikes)
-            burst_scores.append(np.sum(intervals < 0.1))  # count intervals < 100ms as bursts
-        burst_ranks = np.argsort(-np.array(burst_scores))
-
-        # compute STTC
-        sttc_matrix = self.compute_sttc_matrix(train, duration)
-        total_sttc_scores = np.sum(sttc_matrix, axis=0) - 1  # exclude self-connections
-        sttc_ranks = np.argsort(-np.array(total_sttc_scores))
-
-        # combine ranks
-        composite_ranks = firing_rate_ranks + isi_cv_ranks + burst_ranks + sttc_ranks
-        neuron_of_interest = np.argmin(composite_ranks)
-        print(f"Neuron of interest for dataset {dataset_index}: {neuron_of_interest}")
-        return neuron_of_interest
-
-    def plot_population_inverse_isi(self, output_path, dataset_name):
-        print(f"Plotting population-level inverse ISI for {dataset_name}")
+        neuron_of_interest_list = []
         for i, train in enumerate(self.trains):
+            train = self.trains[i]
+            firing_rates = self.firing_rates_list[i]
+            duration = self.durations[i]
+
+            if len(train) == 0 or len(firing_rates) == 0:
+                print("No neurons in dataset.")
+                neuron_of_interest_list.append(None)
+                continue
+
+            # initialize rank arrays
+            num_neurons = len(train)
+            firing_rate_ranks = np.argsort(-np.array(firing_rates))  # descending order
+            isi_cvs = []
+            burst_scores = []
+            sttc_ranks = np.zeros(num_neurons)
+
+            # compute ISI CV
+            for neuron_spikes in train:
+                intervals = np.diff(neuron_spikes)
+                if len(intervals) > 1:
+                    isi_cvs.append(np.std(intervals) / np.mean(intervals))  # CV = std/mean
+                else:
+                    isi_cvs.append(np.inf)
+            isi_cv_ranks = np.argsort(isi_cvs)
+
+            # compute burst tendency
+            for neuron_spikes in train:
+                intervals = np.diff(neuron_spikes)
+                burst_scores.append(np.sum(intervals < 0.1))  # count intervals < 100ms as bursts
+            burst_ranks = np.argsort(-np.array(burst_scores))
+
+            # compute STTC
+            sttc_matrix = self.compute_sttc_matrix(train, duration)
+            total_sttc_scores = np.sum(sttc_matrix, axis=0) - 1  # exclude self-connections
+            sttc_ranks = np.argsort(-np.array(total_sttc_scores))
+
+            # combine ranks
+            composite_ranks = firing_rate_ranks + isi_cv_ranks + burst_ranks + sttc_ranks
+            neuron_of_interest = np.argmin(composite_ranks)
+            print(f"Neuron of interest for dataset {self.cleaned_names[i]}: {neuron_of_interest}")
+            return neuron_of_interest_list
+
+    def plot_population_inverse_isi(self, output_path):
+        for i, train in enumerate(self.trains):
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting population-level inverse ISI for {dataset_name}")
             all_intervals = []
             for neuron_spikes in train:
                 intervals = np.diff(neuron_spikes)
@@ -1083,7 +1054,7 @@ class SpikeDataAnalysis:
                 plt.close()
 
 
-    def plot_neuron_inverse_isi(self, output_path, dataset_name, dataset_index=0):
+    def plot_neuron_inverse_isi(self, output_path):
         """
         Plot the inverse ISI histogram for a single neuron of interest.
 
@@ -1092,61 +1063,64 @@ class SpikeDataAnalysis:
             dataset_name (str): Name of the dataset.
             dataset_index (int): Index of the dataset to analyze.
         """
-        print(f"Plotting inverse ISI for neuron of interest in dataset {dataset_name}")
         # find the neuron of interest
-        neuron_index = self.find_neuron_of_interest(dataset_index)
-        if neuron_index is None:
-            print(f"Could not determine neuron of interest for dataset {dataset_name}. Skipping.")
-            return
+        for i, train in enumerate(self.trains):
+            dataset_name = self.cleaned_names[i]  
+            neuron_index = self.find_neuron_of_interest(i)
+            if neuron_index is None:
+                print(f"Could not determine neuron of interest for dataset {dataset_name}. Skipping.")
+                return
 
-        # get the spike train for the specified neuron
-        train = self.trains[dataset_index]
-        intervals = np.diff(train[neuron_index])  # compute ISI
+            # get the spike train for the specified neuron
+            train = self.trains[i]
+            intervals = np.diff(train[neuron_index])  # compute ISI
 
-        # filter invalid intervals
-        intervals = intervals[intervals > 0]  # remove zero or negative intervals
+            # filter invalid intervals
+            intervals = intervals[intervals > 0]  # remove zero or negative intervals
 
-        if len(intervals) > 0:
-            # calculate inverse ISI and filter invalid values
-            inverse_isi = 1 / intervals
-            inverse_isi = inverse_isi[np.isfinite(inverse_isi)]  # remove infinities
+            if len(intervals) > 0:
+                # calculate inverse ISI and filter invalid values
+                inverse_isi = 1 / intervals
+                inverse_isi = inverse_isi[np.isfinite(inverse_isi)]  # remove infinities
 
-            # clip extreme values for better visualization
-            inverse_isi = inverse_isi[inverse_isi < 500]  # exclude values above 500 Hz
+                # clip extreme values for better visualization
+                inverse_isi = inverse_isi[inverse_isi < 500]  # exclude values above 500 Hz
 
-            # plot the histogram
-            bins = np.linspace(0, 100, 50)  # linear bins, adjust range as needed
-            plt.figure(figsize=(12, 6))
-            plt.hist(inverse_isi, bins=bins, color='blue', alpha=0.7, density=True)
-            plt.xlabel("Instantaneous Firing Rate (Hz)")
-            plt.ylabel("Density")
-            plt.title(f"Neuron {neuron_index} Inverse ISI: {dataset_name}")
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_path, f"neuron_{neuron_index}_inverse_isi_{dataset_name}.png"))
-            plt.close()
-        else:
-            print(f"No valid ISI intervals found for neuron {neuron_index} in dataset {dataset_name}. Skipping.")
+                # plot the histogram
+                bins = np.linspace(0, 100, 50)  # linear bins, adjust range as needed
+                plt.figure(figsize=(12, 6))
+                plt.hist(inverse_isi, bins=bins, color='blue', alpha=0.7, density=True)
+                plt.xlabel("Instantaneous Firing Rate (Hz)")
+                plt.ylabel("Density")
+                plt.title(f"Neuron {neuron_index} Inverse ISI: {dataset_name}")
+                plt.tight_layout()
+                plt.savefig(os.path.join(output_path, f"neuron_{neuron_index}_inverse_isi_{dataset_name}.png"))
+                plt.close()
+            else:
+                print(f"No valid ISI intervals found for neuron {neuron_index} in dataset {dataset_name}. Skipping.")
 
 
-    def plot_neuron_regular_isi(self, output_path, dataset_name, dataset_index=0):
-        print(f"Plotting regular ISI for neuron of interest in dataset {dataset_name}")
-        neuron_index = self.find_neuron_of_interest(dataset_index)
-        if neuron_index is None:
-            print(f"Could not determine neuron of interest for dataset {dataset_name}. Skipping.")
-            return
-        train = self.trains[dataset_index]
-        intervals = np.diff(train[neuron_index])
-        if len(intervals) > 0:
-            plt.figure(figsize=(12, 6))
-            plt.hist(intervals, bins=100, color='orange', alpha=0.7, density=True)
-            plt.xlabel("Inter-Spike Interval (s)")
-            plt.ylabel("Density")
-            plt.title(f"Neuron {neuron_index} Regular ISI: {dataset_name}")
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_path, f"neuron_{neuron_index}_regular_isi_{dataset_name}.png"))
-            plt.close()
+    def plot_neuron_regular_isi(self, output_path):
+        for i, train in enumerate(self.trains):
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting regular ISI for {dataset_name}")
+            neuron_index = self.find_neuron_of_interest(i)
+            if neuron_index is None:
+                print(f"Could not determine neuron of interest for dataset {dataset_name}. Skipping.")
+                return
+            train = self.trains[i]
+            intervals = np.diff(train[neuron_index])
+            if len(intervals) > 0:
+                plt.figure(figsize=(12, 6))
+                plt.hist(intervals, bins=100, color='orange', alpha=0.7, density=True)
+                plt.xlabel("Inter-Spike Interval (s)")
+                plt.ylabel("Density")
+                plt.title(f"Neuron {neuron_index} Regular ISI: {dataset_name}")
+                plt.tight_layout()
+                plt.savefig(os.path.join(output_path, f"neuron_{neuron_index}_regular_isi_{dataset_name}.png"))
+                plt.close()
 
-    def plot_high_activity_rasters(self, output_path, dataset_name):
+    def plot_high_activity_rasters(self, output_path):
         """
         Generate raster plots for high-activity periods with smaller time windows.
 
@@ -1163,8 +1137,9 @@ class SpikeDataAnalysis:
         Saves:
             Raster plots for specified time windows centered on high-activity periods.
         """
-        print(f"Generating high-activity rasters for {dataset_name}")
         for i, train in enumerate(self.trains):
+            dataset_name = self.cleaned_names[i]
+            print(f"Generating high-activity rasters for {dataset_name}")
             # calculate population firing rate
             bins, fr_avg = self.get_population_fr(train, smoothing=True)
 
@@ -1222,7 +1197,7 @@ class SpikeDataAnalysis:
                     plt.close(fig)
 
 
-    def plot_comparison_firing_rate_histogram(self, output_path, base_names, bins=50):
+    def plot_comparison_firing_rate_histogram(self, output_path, bins=50):
         """
         Generate and save a comparison overlay plot for firing rate histograms for all datasets.
 
@@ -1236,19 +1211,19 @@ class SpikeDataAnalysis:
         print("Generating comparison overlay plot for firing rate histograms")
 
         #calculate the min/mac firing rate over all dataset
-        all_firing_rates = np.hstack(self.firing_rates_list)
+        all_firing_rates = np.hstack(self.normalized_firing_rates_list)
         min_firing_rate = np.min(all_firing_rates)
         max_firing_rate = np.max(all_firing_rates)
 
         bin_edges = np.linspace(min_firing_rate, max_firing_rate, bins+1)  # 50 bins
 
         plt.figure(figsize=(12, 6))
-        for i, firing_rates in enumerate(self.firing_rates_list):
+        for i, firing_rates in enumerate(self.normalized_firing_rates_list):
             plt.hist(
                 firing_rates,
                 bins=bin_edges,
                 alpha=0.5,
-                label=base_names[i],
+                label=self.cleaned_names[i],
                 density=True
             )
 
@@ -1260,13 +1235,14 @@ class SpikeDataAnalysis:
         plt.savefig(os.path.join(output_path, "comparison_firing_rate_histogram.png"))
         plt.close()
 
-    def plot_sttc_log(self, output_path, dataset_name):
+    def plot_sttc_log(self, output_path):
         from matplotlib.colors import LogNorm
         """
         Generate an STTC heatmap on a logarithmic scale for all datasets.
         """
-        print(f"Plotting STTC heatmap on a logarithmic scale for {dataset_name}")
         for i, (train, duration) in enumerate(zip(self.trains, self.durations)):
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting STTC heatmap with log scale for {dataset_name}")
             sttc_matrix = self.compute_sttc_matrix(train, duration)
 
             plt.figure(figsize=(10, 8))
@@ -1282,12 +1258,13 @@ class SpikeDataAnalysis:
             plt.savefig(plot_name)
             plt.close()
 
-    def plot_sttc_vmin_vmax(self, output_path, dataset_name):
+    def plot_sttc_vmin_vmax(self, output_path):
         """
         Generate an STTC heatmap with dynamic vmin and vmax boundaries for all datasets.
         """
-        print(f"Plotting STTC heatmap with dynamic vmin/vmax for {dataset_name}")
         for i, (train, duration) in enumerate(zip(self.trains, self.durations)):
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting STTC heatmap with dynamic vmin/vmax for {dataset_name}")
             sttc_matrix = self.compute_sttc_matrix(train, duration)
             vmin = np.percentile(sttc_matrix, 5)
             vmax = np.percentile(sttc_matrix, 95)
@@ -1299,18 +1276,18 @@ class SpikeDataAnalysis:
             plt.ylabel('Neuron')
             plt.title(f"STTC Heatmap (Percentile Range: {vmin:.2f}-{vmax:.2f}): {dataset_name}")
             plt.tight_layout()
-
             plot_name = os.path.join(output_path, f"sttc_vmin_vmax_{dataset_name}.png")
             plt.savefig(plot_name)
             plt.close()
 
-    def plot_sttc_thresh(self, output_path, dataset_name):
+    def plot_sttc_thresh(self, output_path):
         from matplotlib import cm
         """
         Generate an STTC heatmap with threshold-based shading for all datasets.
         """
-        print(f"Plotting STTC heatmap with threshold-based shading for {dataset_name}")
         for i, (train, duration) in enumerate(zip(self.trains, self.durations)):
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting STTC heatmap with threshold-based shading for {dataset_name}")
             sttc_matrix = self.compute_sttc_matrix(train, duration)
             threshold_lower = np.percentile(np.abs(sttc_matrix), 25)
 
@@ -1330,12 +1307,13 @@ class SpikeDataAnalysis:
             plt.savefig(plot_name)
             plt.close()
 
-    def plot_kde_pdf(self, output_path, dataset_name):
+    def plot_kde_pdf(self, output_path):
         """
         Generate KDE and PDF plots for STTC values for all datasets.
         """
-        print(f"Plotting STTC KDE and PDF for {dataset_name}")
-        for train, duration in zip(self.trains, self.durations):
+        for i, (train, duration) in enumerate(zip(self.trains, self.durations)):
+            dataset_name = self.cleaned_names[i]
+            print(f"Generating KDE and PDF plots for STTC values for {dataset_name}")
             sttc_matrix = self.compute_sttc_matrix(train, duration)
             sttc_values = self.get_upper_triangle_values(sttc_matrix)
             if sttc_values.size == 0:
@@ -1366,7 +1344,7 @@ class SpikeDataAnalysis:
             plt.savefig(plot_name)
             plt.close()
 
-    def plot_comparison_kde_pdf(self, output_path, base_names):
+    def plot_comparison_kde_pdf(self, output_path,):
         """
         Generate comparison KDE/PDF overlay plots for all datasets.
         """
@@ -1381,15 +1359,15 @@ class SpikeDataAnalysis:
 
         legend_items = []  # to store legend handles and labels in order
 
-        for idx, (train, duration, name) in enumerate(zip(self.trains, self.durations, base_names)):
+        for idx, (train, duration) in enumerate(zip(self.trains, self.durations)):
+            name = self.cleaned_names[idx]
             sttc_matrix = self.compute_sttc_matrix(train, duration)
             sttc_values = self.get_upper_triangle_values(sttc_matrix)
 
             if sttc_values.size == 0:
-                print(f"Warning: No valid STTC values for dataset {name_cleaned}. Skipping plot.")
+                print(f"Warning: No valid STTC values for dataset {name}. Skipping plot.")
                 continue
 
-            name_cleaned = name.replace('_acqm', '') #cleaning up the name to make legend smaller
             color = cmap(idx %10) # assign color based on index
 
             # KDE computation
@@ -1398,8 +1376,8 @@ class SpikeDataAnalysis:
             kde_values = kde(x_range)
 
             # overlay KDE and PDF
-            kde_line = ax_kde.plot(x_range, kde_values, label=f'{name_cleaned} (KDE)', alpha=0.7, color=color)
-            pdf_bars= ax_pdf.hist(sttc_values, bins=50, density=True, alpha=0.3, label=f'{name_cleaned} (PDF)', color=color)
+            kde_line = ax_kde.plot(x_range, kde_values, label=f'{name} (KDE)', alpha=0.7, color=color)
+            pdf_bars= ax_pdf.hist(sttc_values, bins=50, density=True, alpha=0.3, label=f'{name} (PDF)', color=color)
 
             # append to legend items in order
             legend_items.append((kde_line, f'{name} (KDE)'))
@@ -1430,7 +1408,7 @@ class SpikeDataAnalysis:
         plt.close()
 
 
-    def plot_pairwise_linear_comparison(self, output_path, base_names, metric):
+    def plot_pairwise_linear_comparison(self, output_path, metric):
         """
         Pairwise linear comparison of a given metric (e.g., STTC, ISI, Firing Rate).
 
@@ -1469,7 +1447,7 @@ class SpikeDataAnalysis:
         metric_values_list = compute_metric(metric)
 
         # pairwise comparisons
-        for (i, j) in combinations(range(len(base_names)), 2):
+        for (i, j) in combinations(range(len(self.cleaned_names)), 2):
             
             #clean names
             name_1 = self.cleaned_names[i]
@@ -1495,7 +1473,7 @@ class SpikeDataAnalysis:
             plt.savefig(plot_filename)
             plt.close()
 
-    def plot_global_metric_comparison(self, output_path, base_names, metric):
+    def plot_global_metric_comparison(self, output_path, metric):
         """
         Global linear comparison of a given metric across all datasets.
 
@@ -1507,7 +1485,7 @@ class SpikeDataAnalysis:
         # skip if fewer than three datasets 
         import os
 
-        if len(base_names) < 3:
+        if len(self.cleaned_names) < 3:
             print("Global comparison requires at least three datasets. Skipping.")
             return
         
@@ -1826,7 +1804,7 @@ class SpikeDataAnalysis:
             plt.savefig(os.path.join(output_path, f"{dataset_name}_pca_scree_plot.png"))
             plt.close()
 
-    def analyze_burst_characteristics(self, output_path, dataset_names):
+    def analyze_burst_characteristics(self, output_path):
         """
         Analyze and compare burst characteristics (inter-burst intervals, burst frequencies, durations, and neuron participation) across datasets.
 
@@ -1922,7 +1900,7 @@ class SpikeDataAnalysis:
         plt.savefig(os.path.join(comparison_dir, "comparison_neuron_participation.png"))
         plt.close()
 
-    def plot_neuron_status_overlay(self, output_path, cleaned_names):
+    def plot_neuron_status_overlay(self, output_path):
         """
         overlay footprint plots showing neuron presence, recovery, loss, and uniqueness across datasets.
         
@@ -2000,7 +1978,7 @@ class SpikeDataAnalysis:
 
         # ======= UPDATED SECTION BEGINS: Simplify dataset names =======
         simplified_names = []
-        for name in cleaned_names:
+        for name in self.cleaned_names:
             # remove trailing date and 'acqm' parts
             name_no_date = re.sub(r'_\d{8}_acqm(\.zip)?$', '', name, flags=re.IGNORECASE)
 
@@ -2081,6 +2059,28 @@ class SpikeDataAnalysis:
         plt.savefig(output_file, bbox_inches='tight')
         plt.close()
 
+    def plot_raw_footprint(self, output_path):
+        plt.close('all')
+        for i, neuron_data in enumerate(self.neuron_data_list):
+            dataset_name = self.cleaned_names[i]
+            print(f"Generating raw footprint plot for {dataset_name}")
+            neuron_x, neuron_y = [], []
+
+            for j, neuron in enumerate(neuron_data.values()):
+                x, y = neuron['position']
+                if (x, y) != (0, 0):  # exclude the calibration electrode
+                    neuron_x.append(x)
+                    neuron_y.append(y)
+
+            plt.figure(figsize=(11, 9))
+            plt.scatter(neuron_x, neuron_y, c='b')
+        
+            plt.xlabel(r"Horizontal Position ($\mu$m)")
+            plt.ylabel(r"Vertical Position ($\mu$m)")
+            plt.title(f"Footprint Plot with Firing Rates: {dataset_name}")
+            plt.savefig(os.path.join(output_path, f"footprint_plot_fr_{dataset_name}.png"))
+            plt.close()
+
 
     def run_all_analyses(self, output_folder, base_names, perform_pca=False, cleanup=True):
         """
@@ -2112,34 +2112,33 @@ class SpikeDataAnalysis:
         os.makedirs(global_dir, exist_ok=True)
 
         # perform analyses for each dataset
-        for i, (dataset_dir, dataset_name) in enumerate(dataset_directories):
+        for i, dataset_dir in enumerate(dataset_directories):
             
             #create rasters 
             #self.raster_plot(rasters_dir, dataset_name)
             #self.plot_high_activity_rasters(rasters_dir, dataset_name)
 
             #regular analysis
-            self.raster_plot(dataset_dir, dataset_name)
-            self.footprint_overlay_fr(dataset_dir, dataset_name)
-            self.overlay_fr_raster(dataset_dir, dataset_name)
-            self.plot_smoothed_population_fr(dataset_dir, dataset_name)
-            self.sttc_plot(dataset_dir, dataset_name)
-            self.plot_firing_rate_histogram(dataset_dir, dataset_name)
-            self.plot_firing_rate_cdf(dataset_dir, dataset_name)
-            self.plot_isi_histogram(dataset_dir, dataset_name)
-            self.plot_cv_of_isi(dataset_dir, dataset_name)
-            self.plot_raw_population_fr(dataset_dir, dataset_name)
-            self.plot_synchrony_index_over_time(dataset_dir, dataset_name)
-            self.plot_active_units_per_electrode(dataset_dir, dataset_name)
-            #self.plot_electrode_activity_heatmap(dataset_dir, dataset_name) #need a layout of electrodes for this
-            self.plot_sttc_over_time(dataset_dir, dataset_name)
-            self.plot_footprint_sttc(dataset_dir, dataset_name)
-            self.plot_sttc_log(dataset_dir, dataset_name)
-            self.plot_sttc_vmin_vmax(dataset_dir, dataset_name)
-            self.plot_sttc_thresh(dataset_dir, dataset_name)
-            self.plot_kde_pdf(dataset_dir, dataset_name)
-            self.sttc_violin_plot_by_firing_rate_individual(dataset_dir, dataset_name)
-            self.sttc_violin_plot_by_proximity_individual(dataset_dir, dataset_name)
+            self.raster_plot(dataset_dir)
+            self.footprint_overlay_fr(dataset_dir)
+            self.overlay_fr_raster(dataset_dir)
+            self.plot_smoothed_population_fr(dataset_dir)
+            self.sttc_plot(dataset_dir)
+            self.plot_firing_rate_histogram(dataset_dir)
+            self.plot_firing_rate_cdf(dataset_dir)
+            self.plot_isi_histogram(dataset_dir)
+            self.plot_cv_of_isi(dataset_dir)
+            self.plot_raw_population_fr(dataset_dir)
+            self.plot_synchrony_index_over_time(dataset_dir)
+            self.plot_sttc_over_time(dataset_dir)
+            self.plot_footprint_sttc(dataset_dir)
+            self.plot_sttc_log(dataset_dir)
+            self.plot_sttc_vmin_vmax(dataset_dir)
+            self.plot_sttc_thresh(dataset_dir)
+            self.plot_kde_pdf(dataset_dir)
+            self.sttc_violin_plot_by_firing_rate_individual(dataset_dir)
+            self.sttc_violin_plot_by_proximity_individual(dataset_dir)
+            self.plot_raw_footprint(dataset_dir)
 
             if perform_pca:
                   #creating a pca subdirectory for each dataset
@@ -2159,14 +2158,14 @@ class SpikeDataAnalysis:
 
 
         # generate comparison plots
-        self.sttc_violin_plot_by_firing_rate_compare(comparison_dir, base_names)
-        self.sttc_violin_plot_by_proximity_compare(comparison_dir, base_names)
-        self.sttc_violin_plot_across_recordings(comparison_dir, base_names)
-        self.plot_comparison_inverse_isi(comparison_dir, base_names)
-        self.plot_comparison_regular_isi(comparison_dir, base_names)
-        self.plot_comparison_firing_rate_histogram(comparison_dir, base_names)
-        self.plot_comparison_kde_pdf(comparison_dir, base_names)
-        self.analyze_burst_characteristics(comparison_dir, base_names)
+        self.sttc_violin_plot_by_firing_rate_compare(comparison_dir)
+        self.sttc_violin_plot_by_proximity_compare(comparison_dir)
+        self.sttc_violin_plot_across_recordings(comparison_dir)
+        self.plot_comparison_inverse_isi(comparison_dir)
+        self.plot_comparison_regular_isi(comparison_dir)
+        self.plot_comparison_firing_rate_histogram(comparison_dir)
+        self.plot_comparison_kde_pdf(comparison_dir)
+        self.analyze_burst_characteristics(comparison_dir)
 
 
 
@@ -2174,12 +2173,12 @@ class SpikeDataAnalysis:
         #linear comparisons
         metrics = ["sttc", "firing_rate", "isi"]
         for metric in metrics:
-            self.plot_pairwise_linear_comparison(pairwise_dir, base_names, metric)
+            self.plot_pairwise_linear_comparison(pairwise_dir, metric)
 
         #global linear comparison (for 3+ datasets)
         if len(self.trains) >= 3:
             for metric in metrics:
-                self.plot_global_metric_comparison(global_dir, base_names, metric)
+                self.plot_global_metric_comparison(global_dir, metric)
 
 
         # optional PCA analysis
