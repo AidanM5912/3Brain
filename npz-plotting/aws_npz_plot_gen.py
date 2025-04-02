@@ -7,11 +7,14 @@ import itertools
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import pandas as pd
 import re
 import shutil
 import scipy.stats
 import scipy.ndimage
 import sklearn.decomposition
+import sklearn.cluster
+import seaborn as sns
 import sys
 import tempfile
 import uuid
@@ -54,7 +57,7 @@ class SpikeDataAnalysis:
             self.data = self.data_list[0]
             self.train = self.trains[0]
             self.firing_rates = self.firing_rates_list[0]
-            self.normalized_firing_rates_list = self.normalized_firing_rates_list[0]
+            self.normalized_firing_rates = self.normalized_firing_rates_list[0]
             self.duration = self.durations[0]
             self.neuron_data = self.neuron_data_list[0]
             self.number_of_neurons = self.num_neurons_list[0]
@@ -100,8 +103,9 @@ class SpikeDataAnalysis:
             self.trains.append(train)
             self.durations.append(max([max(times) for times in train]))
             firing_rates = [len(neuron_spikes) / max([max(times) for times in train]) for neuron_spikes in train]
-            normalized_firing_rates = [rate / len(train) for rate in firing_rates]  # normalize by the total number of neurons
             self.firing_rates_list.append(firing_rates)
+            normalized_firing_rates = [rate / len(train) for rate in firing_rates]  # normalize by the total number of neurons
+            self.normalized_firing_rates_list.append(normalized_firing_rates)
             self.neuron_data_list.append(data.get("neuron_data", {}).item())
             self.num_neurons_list.append(len(train))
 
@@ -146,7 +150,7 @@ class SpikeDataAnalysis:
                 y += 1
 
             num_neurons = len(train)
-            tick_spacing = 1 if num_neurons <= 50 else 2 if num_neurons <= 100 else 3 if num_neurons <= 150 else 5
+            tick_spacing = 1 if num_neurons <= 50 else 2 if num_neurons <= 100 else 3 if num_neurons <= 150 else 5 if num_neurons <= 200 else 6 if num_neurons <= 250 else 7 if num_neurons <= 300 else 9 if num_neurons <= 400 else 10 if num_neurons <= 500 else 15
             ax.set_yticks(range(1, num_neurons + 1, tick_spacing))
 
             ax.set_xlabel('Time (s)')
@@ -159,7 +163,7 @@ class SpikeDataAnalysis:
             secax.set_xticks(xticks)
             secax.set_xticklabels([f"{x / 3600:.2f}" for x in xticks])
 
-            ax.set_title(f"Raster Plot: {dataset_name}")
+            ax.set_title(f"Raster Plot: {dataset_name}, Total units: {num_neurons}")
             plt.savefig(os.path.join(output_path, f"raster_{dataset_name}.png"))
             plt.close(fig)
 
@@ -183,15 +187,15 @@ class SpikeDataAnalysis:
             legend_rates = np.percentile(firing_rates, [50, 75, 90, 98])
 
             plt.figure(figsize=(11, 9))
-            plt.scatter(neuron_x, neuron_y, s=firing_rates * 1800, alpha=0.4, c='r', edgecolors='none')
+            plt.scatter(neuron_x, neuron_y, s=firing_rates * 300, alpha=0.4, c='r', edgecolors='none')
         
             for rate in legend_rates:
-                plt.scatter([], [], s=rate * 1800, c='r', alpha=0.4, label=f'{rate:.2f} kHz')
+                plt.scatter([], [], s=rate * 300, c='r', alpha=0.4, label=f'{rate:.2f} Hz')
 
             plt.legend(scatterpoints=1, frameon=True, labelspacing=1.4, handletextpad=0.8, borderpad=0.92, title='Firing Rate', loc = 'best', title_fontsize=10, fontsize=10)
             plt.xlabel(r"Horizontal Position ($\mu$m)")
             plt.ylabel(r"Vertical Position ($\mu$m)")
-            plt.title(f"Footprint Plot with Firing Rates: {dataset_name}")
+            plt.title(f"Footprint Plot with Firing Rates: {dataset_name}, Total units: {len(neuron_x)}")
             plt.savefig(os.path.join(output_path, f"footprint_plot_fr_{dataset_name}.png"))
             plt.close()
 
@@ -281,7 +285,7 @@ class SpikeDataAnalysis:
             plt.close(fig)
 
     @staticmethod
-    def compute_sttc_matrix(spike_train, length, delt=20):
+    def compute_sttc_matrix(spike_train, length, delt=.02):
 
         #handle this case
         if not any(len(ts) > 0 for ts in spike_train):
@@ -957,62 +961,6 @@ class SpikeDataAnalysis:
         plt.savefig(os.path.join(output_path, "comparison_regular_isi.png"))
         plt.close()
 
-    def find_neuron_of_interest(self):
-        """
-        Identify the neuron of interest based on composite ranking criteria.
-        Criteria: 
-        1. Firing rate (higher is better).
-        2. Regular spiking intervals (lower CV is better).
-        3. Tendency to fire in bursts (higher is better).
-        4. Total STTC (higher is better).
-        
-        Returns:
-            The index of the "neuron of interest."
-        """
-        neuron_of_interest_list = []
-        for i, train in enumerate(self.trains):
-            train = self.trains[i]
-            firing_rates = self.firing_rates_list[i]
-            duration = self.durations[i]
-
-            if len(train) == 0 or len(firing_rates) == 0:
-                print("No neurons in dataset.")
-                neuron_of_interest_list.append(None)
-                continue
-
-            # initialize rank arrays
-            num_neurons = len(train)
-            firing_rate_ranks = np.argsort(-np.array(firing_rates))  # descending order
-            isi_cvs = []
-            burst_scores = []
-            sttc_ranks = np.zeros(num_neurons)
-
-            # compute ISI CV
-            for neuron_spikes in train:
-                intervals = np.diff(neuron_spikes)
-                if len(intervals) > 1:
-                    isi_cvs.append(np.std(intervals) / np.mean(intervals))  # CV = std/mean
-                else:
-                    isi_cvs.append(np.inf)
-            isi_cv_ranks = np.argsort(isi_cvs)
-
-            # compute burst tendency
-            for neuron_spikes in train:
-                intervals = np.diff(neuron_spikes)
-                burst_scores.append(np.sum(intervals < 0.1))  # count intervals < 100ms as bursts
-            burst_ranks = np.argsort(-np.array(burst_scores))
-
-            # compute STTC
-            sttc_matrix = self.compute_sttc_matrix(train, duration)
-            total_sttc_scores = np.sum(sttc_matrix, axis=0) - 1  # exclude self-connections
-            sttc_ranks = np.argsort(-np.array(total_sttc_scores))
-
-            # combine ranks
-            composite_ranks = firing_rate_ranks + isi_cv_ranks + burst_ranks + sttc_ranks
-            neuron_of_interest = np.argmin(composite_ranks)
-            print(f"Neuron of interest for dataset {self.cleaned_names[i]}: {neuron_of_interest}")
-            return neuron_of_interest_list
-
     def plot_population_inverse_isi(self, output_path):
         for i, train in enumerate(self.trains):
             dataset_name = self.cleaned_names[i]
@@ -1051,73 +999,6 @@ class SpikeDataAnalysis:
                 plt.title(f"Population-Level Inverse ISI: {dataset_name}")
                 plt.tight_layout()
                 plt.savefig(os.path.join(output_path, f"population_inverse_isi_{dataset_name}.png"))
-                plt.close()
-
-
-    def plot_neuron_inverse_isi(self, output_path):
-        """
-        Plot the inverse ISI histogram for a single neuron of interest.
-
-        Parameters:
-            output_path (str): Directory to save the plot.
-            dataset_name (str): Name of the dataset.
-            dataset_index (int): Index of the dataset to analyze.
-        """
-        # find the neuron of interest
-        for i, train in enumerate(self.trains):
-            dataset_name = self.cleaned_names[i]  
-            neuron_index = self.find_neuron_of_interest(i)
-            if neuron_index is None:
-                print(f"Could not determine neuron of interest for dataset {dataset_name}. Skipping.")
-                return
-
-            # get the spike train for the specified neuron
-            train = self.trains[i]
-            intervals = np.diff(train[neuron_index])  # compute ISI
-
-            # filter invalid intervals
-            intervals = intervals[intervals > 0]  # remove zero or negative intervals
-
-            if len(intervals) > 0:
-                # calculate inverse ISI and filter invalid values
-                inverse_isi = 1 / intervals
-                inverse_isi = inverse_isi[np.isfinite(inverse_isi)]  # remove infinities
-
-                # clip extreme values for better visualization
-                inverse_isi = inverse_isi[inverse_isi < 500]  # exclude values above 500 Hz
-
-                # plot the histogram
-                bins = np.linspace(0, 100, 50)  # linear bins, adjust range as needed
-                plt.figure(figsize=(12, 6))
-                plt.hist(inverse_isi, bins=bins, color='blue', alpha=0.7, density=True)
-                plt.xlabel("Instantaneous Firing Rate (Hz)")
-                plt.ylabel("Density")
-                plt.title(f"Neuron {neuron_index} Inverse ISI: {dataset_name}")
-                plt.tight_layout()
-                plt.savefig(os.path.join(output_path, f"neuron_{neuron_index}_inverse_isi_{dataset_name}.png"))
-                plt.close()
-            else:
-                print(f"No valid ISI intervals found for neuron {neuron_index} in dataset {dataset_name}. Skipping.")
-
-
-    def plot_neuron_regular_isi(self, output_path):
-        for i, train in enumerate(self.trains):
-            dataset_name = self.cleaned_names[i]
-            print(f"Plotting regular ISI for {dataset_name}")
-            neuron_index = self.find_neuron_of_interest(i)
-            if neuron_index is None:
-                print(f"Could not determine neuron of interest for dataset {dataset_name}. Skipping.")
-                return
-            train = self.trains[i]
-            intervals = np.diff(train[neuron_index])
-            if len(intervals) > 0:
-                plt.figure(figsize=(12, 6))
-                plt.hist(intervals, bins=100, color='orange', alpha=0.7, density=True)
-                plt.xlabel("Inter-Spike Interval (s)")
-                plt.ylabel("Density")
-                plt.title(f"Neuron {neuron_index} Regular ISI: {dataset_name}")
-                plt.tight_layout()
-                plt.savefig(os.path.join(output_path, f"neuron_{neuron_index}_regular_isi_{dataset_name}.png"))
                 plt.close()
 
     def plot_high_activity_rasters(self, output_path):
@@ -1407,7 +1288,6 @@ class SpikeDataAnalysis:
         plt.savefig(plot_name)
         plt.close()
 
-
     def plot_pairwise_linear_comparison(self, output_path, metric):
         """
         Pairwise linear comparison of a given metric (e.g., STTC, ISI, Firing Rate).
@@ -1530,280 +1410,6 @@ class SpikeDataAnalysis:
         plt.savefig(plot_filename)
         plt.close()
 
-
-    def calculate_static_fr_pca_whole(self, subset_neurons=None):
-        """
-        Calculate PCA for static firing rates across all datasets, truncating to the size of the smallest dataset.
-
-        Parameters:
-            subset_neurons (int, optional): Number of top neurons (by mean firing rate) to include.
-                                            If None, all neurons are included.
-
-        Returns:
-            tuple: (pca_result, explained_variance)
-                - pca_result: Transformed PCA coordinates (Neurons x PCs).
-                - explained_variance: Variance explained by each PC.
-        """
-
-        from sklearn.decomposition import PCA
-
-        print("Calculating PCA for static firing rates (whole dataset)")
-
-        # construct firing rate matrices for all datasets
-        firing_rate_matrices = [
-            np.array(firing_rates).reshape(-1, 1) for firing_rates in self.firing_rates_list
-        ]
-
-        # determine the minimum number of neurons across datasets
-        min_neurons = min(matrix.shape[0] for matrix in firing_rate_matrices)
-
-        # truncate matrices to the size of the smallest dataset
-        truncated_matrices = [
-            matrix[:min_neurons, :] for matrix in firing_rate_matrices
-        ]
-
-        # combine truncated matrices into a single matrix (neurons x datasets)
-        combined_matrix = np.hstack(truncated_matrices)
-
-        # normalize by the total number of neurons
-        #not needed anymore, we do this in load_npz_file now
-        #total_neurons = combined_matrix.shape[0]
-        #combined_matrix = combined_matrix / total_neurons
-
-        # optionally filter top neurons by mean firing rate
-        if subset_neurons:
-            mean_firing_rates = np.mean(combined_matrix, axis=1)
-            top_indices = np.argsort(-mean_firing_rates)[:subset_neurons]
-            combined_matrix = combined_matrix[top_indices, :]
-
-        # check for valid firing rate matrix dimensions
-        if combined_matrix.shape[0] < 2 or combined_matrix.shape[1] < 2:
-            raise ValueError("Firing rate matrix is too small for PCA. Ensure sufficient neurons and datasets are included.")
-
-        # PCA
-        pca = PCA()
-        pca_result = pca.fit_transform(combined_matrix)
-        explained_variance = pca.explained_variance_ratio_
-
-        return pca_result, explained_variance
-
-
-
-    def calculate_individual_time_binned_pca(self, bin_size=0.1, subset_neurons=None):
-        """
-        Calculate PCA on time-binned firing rates for each dataset independently.
-
-        Parameters:
-            bin_size (float): Time bin size in seconds.
-            subset_neurons (int, optional): Number of top neurons (by mean firing rate) to include.
-                                            If None, all neurons are included.
-
-        Returns:
-            list of tuples: [(pca_result, explained_variance, time_bins, dataset_name), ...]
-                Each tuple contains:
-                    - pca_result: Transformed PCA coordinates (time bins x PCs).
-                    - explained_variance: Variance explained by each PC.
-                    - time_bins: Array of time bin centers.
-                    - dataset_name: Name of the dataset.
-        """
-        from sklearn.decomposition import PCA
-        print("Calculating PCA for individual time-binned firing rates")
-        results = []
-
-        for train, duration, dataset_name in zip(self.trains, self.durations, self.input_paths):
-            # Determine bin edges based on duration
-            num_bins = int(duration // bin_size) + 1
-            bin_edges = np.linspace(0, duration, num_bins)
-
-            # Compute time-binned firing rates
-            binned_rates = np.array([
-                np.histogram(neuron_spikes, bins=bin_edges)[0] / bin_size
-                for neuron_spikes in train
-            ]).T
-            binned_rates /= len(train)  # Normalize by number of neurons in the dataset
-
-            # Optionally filter top neurons by mean firing rate
-            if subset_neurons:
-                mean_firing_rates = np.mean(binned_rates, axis=0)
-                top_indices = np.argsort(-mean_firing_rates)[:subset_neurons]
-                binned_rates = binned_rates[:, top_indices]
-
-            # Perform PCA
-            pca = PCA()
-            pca_result = pca.fit_transform(binned_rates)
-            explained_variance = pca.explained_variance_ratio_
-
-            # Store results
-            time_bins = bin_edges[:-1] + (bin_size / 2)
-            results.append((pca_result, explained_variance, time_bins, os.path.basename(dataset_name)))
-
-        return results
-
-    def calculate_static_pca_individual(self, subset_neurons=None):
-        """
-        Calculate PCA for static firing rates for each dataset independently.
-
-        Parameters:
-            subset_neurons (int, optional): Number of top neurons (by mean firing rate) to include.
-                                            If None, all neurons are included.
-
-        Returns:
-            list: List of tuples (pca_result, explained_variance, dataset_name) for each dataset.
-        """
-        from sklearn.decomposition import PCA
-        print("Calculating PCA for static firing rates (individual datasets)")
-        results = []
-
-        for firing_rates, dataset_name in zip(self.firing_rates_list, self.input_paths):
-            firing_rate_matrix = np.array(firing_rates).reshape(-1, 1)  # Reshape for PCA
-
-            # Optionally filter top neurons by mean firing rate
-            if subset_neurons:
-                top_indices = np.argsort(-firing_rate_matrix.flatten())[:subset_neurons]
-                firing_rate_matrix = firing_rate_matrix[top_indices]
-
-            #not needed per function as we are doing this in load_npz_file now
-            #firing_rate_matrix /= len(firing_rates)
-
-            # Perform PCA
-            pca = PCA()
-            pca_result = pca.fit_transform(firing_rate_matrix)
-            explained_variance = pca.explained_variance_ratio_
-
-            results.append((pca_result, explained_variance, os.path.basename(dataset_name)))
-
-        return results
-
-    def plot_static_fr_pca_whole(self, pca_result, explained_variance, output_path):
-        """
-        Plot PCA results for static firing rates.
-
-        Parameters:
-            pca_result (numpy.ndarray): Transformed PCA coordinates (Neurons x PCs).
-            explained_variance (numpy.ndarray): Variance explained by each PC.
-            output_path (str): Directory to save the PCA plots.
-        """
-        print("Plotting PCA results for static firing rates (whole dataset)")
-        # scatter Plot: neurons in PCA space (PC1 vs PC2)
-        plt.figure(figsize=(10, 8))
-        plt.scatter(pca_result[:, 0], pca_result[:, 1], alpha=0.7)
-        plt.xlabel("PC1")
-        plt.ylabel("PC2")
-        plt.title("PCA of Firing Rate Variance (PC1 vs PC2, All Datasets) (Truncated to smallest dataset)")
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_path, "pca_scatter_plot_static_whole.png"))
-        plt.close()
-
-        # scree plot: variance explained by each PC
-        plt.figure(figsize=(10, 6))
-        plt.bar([1, 2, 3], explained_variance[:3], alpha=0.7)  # only plot the first three PCs
-        plt.xticks([1,2,3])
-        plt.xlabel("Principal Component")
-        plt.ylabel("Proportion of Variance Explained")
-        plt.title("Scree Plot of PCA Components (All Datasets) (Truncated to smallest dataset)")
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_path, "pca_scree_plot_static_whole.png"))
-        plt.close()
-
-    def plot_individual_time_binned_pca(self, pca_results, output_path):
-        """
-        Plot PCA results for each dataset independently.
-
-        Parameters:
-            pca_results: List of PCA results (output of `calculate_individual_time_binned_pca`).
-            output_path: Directory to save the plots.
-        """
-        print("Plotting PCA results for individual time-binned firing rates")
-        for pca_result, explained_variance, time_bins, dataset_name in pca_results:
-
-            # Scatter plot: PC1 vs PC2 (colored by time)
-            plt.figure(figsize=(10, 8))
-            plt.scatter(pca_result[:, 0], pca_result[:, 1], c=time_bins, cmap='viridis', alpha=0.7)
-            plt.colorbar(label='Time (s)')
-            plt.xlabel("PC1")
-            plt.ylabel("PC2")
-            plt.title(f"PCA Scatter: {dataset_name} (PC1 vs PC2)")
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_path, f"{dataset_name}_pca_scatter.png"))
-            plt.close()
-
-            # Component time series (first few PCs)
-            subplots_dir = os.path.join(output_path, "pca_time_series_plots")
-            os.makedirs(subplots_dir, exist_ok=True)
-            segment_length = int(len(time_bins) / 5)  # Divide into 5 segments
-            for segment_idx in range(5):
-                start_idx = segment_idx * segment_length
-                end_idx = start_idx + segment_length
-
-                plt.figure(figsize=(12, 6))
-                for pc_idx in range(3):  # Plot first 3 PCs
-                    plt.plot(time_bins[start_idx:end_idx], pca_result[start_idx:end_idx, pc_idx], label=f"PC{pc_idx + 1}")
-
-                plt.xlabel("Time (s)")
-                plt.ylabel("Component Value")
-                plt.title(f"PCA Components Over Time (Segment {segment_idx + 1}/5)")
-                plt.legend()
-                plt.tight_layout()
-                plt.savefig(os.path.join(subplots_dir, f"pca_time_series_segment_{segment_idx + 1}.png"))
-                plt.close()
-
-            # Scree plot: explained variance
-            plt.figure(figsize=(10, 6))
-            plt.bar(range(1, len(explained_variance) + 1), explained_variance, alpha=0.7)
-            plt.xlabel("Principal Component")
-            plt.ylabel("Proportion of Variance Explained")
-            plt.title(f"Scree Plot: {dataset_name}")
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_path, f"{dataset_name}_pca_scree_plot.png"))
-            plt.close()
-
-    def plot_static_pca_individual(self, pca_results, output_path):
-        """
-        Plot PCA results for static firing rates for each dataset.
-
-        Parameters:
-            pca_results: List of PCA results (output of `calculate_static_pca_individual`).
-            output_path: Directory to save the plots.
-        """
-        print("Plotting PCA results for static firing rates (individual datasets)")        
-        for (pca_result, explained_variance, dataset_name) in pca_results:
-
-            """
-            IGNORE THIS FOR NOW 
-
-           
-            File "/app/aws_npz_plot_gen.py", line 1943, in run_all_analyses
-                self.plot_static_pca_individual(results, comparison_dir)  # individual static PCA
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-            File "/app/aws_npz_plot_gen.py", line 1717, in plot_static_pca_individual
-                        plt.scatter(pca_result[:, 0], pca_result[:, 1], alpha=0.7)
-                                                      ~~~~~~~~~~^^^^^^
-            IndexError: index 1 is out of bounds for axis 1 with size 1
-            
-            ***tested on same dataset no error thrown. not an important plot, will ignore for now
-
-            # Scatter Plot: PC1 vs PC2
-            plt.figure(figsize=(10, 8))
-            plt.scatter(pca_result[:, 0], pca_result[:, 1], alpha=0.7)
-            plt.xlabel("PC1")
-            plt.ylabel("PC2")
-            plt.title(f"PCA of Firing Rate Variance (PC1 vs PC2): {dataset_name}")
-            plt.tight_layout()
-            plt.savefig(os.path.join(dataset_dir, f"{dataset_name}_pca_scatter.png"))
-            plt.close()
-            """
-
-
-            # Scree plot: variance explained by each PC
-            plt.figure(figsize=(10, 6))
-            plt.bar(range(1, len(explained_variance) + 1), explained_variance, alpha=0.7)
-            plt.xlabel("Principal Component")
-            plt.ylabel("Proportion of Variance Explained")
-            plt.title(f"Scree Plot: {dataset_name}")
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_path, f"{dataset_name}_pca_scree_plot.png"))
-            plt.close()
-
     def analyze_burst_characteristics(self, output_path):
         """
         Analyze and compare burst characteristics (inter-burst intervals, burst frequencies, durations, and neuron participation) across datasets.
@@ -1900,165 +1506,6 @@ class SpikeDataAnalysis:
         plt.savefig(os.path.join(comparison_dir, "comparison_neuron_participation.png"))
         plt.close()
 
-    def plot_neuron_status_overlay(self, output_path):
-        """
-        overlay footprint plots showing neuron presence, recovery, loss, and uniqueness across datasets.
-        
-        parameters:
-            output_path (str): path to save the generated plot.
-            cleaned_names (list): cleaned names of the datasets in chronological order.
-        """
-        from collections import defaultdict
-
-        print("Generating neuron status overlay plot...")
-        plt.close('all')
-
-        # initialize neuron position tracking
-        position_map = defaultdict(list)
-        total_counts = []
-
-        # build position map for each day's neuron data
-        for day_index, neuron_data in enumerate(self.neuron_data_list):
-            for neuron_id, neuron_info in neuron_data.items():
-                position = tuple(neuron_info['position'])
-                position_map[position].append(day_index)
-            total_counts.append(len(neuron_data))
-
-        total_days = len(self.neuron_data_list)
-        all_days = set(range(total_days))
-
-        # categorize neurons with refined logic
-        neuron_categories = {
-            "Present in All": [],
-            "Lost (never returned)": [],
-            "Recovered": [],
-            "Newly Appeared": [],
-            "Unique": []
-        }
-
-        for position, days_present in position_map.items():
-            days_present_set = set(days_present)
-            if days_present_set == all_days:
-                neuron_categories["Present in All"].append(position)
-            elif len(days_present_set) == 1 and 0 in days_present_set:
-                neuron_categories["Lost (never returned)"].append(position)
-            elif len(days_present_set) == 1 and 0 not in days_present_set:
-                neuron_categories["Unique"].append(position)
-            elif 0 in days_present_set:
-                neuron_categories["Recovered"].append(position)
-            else:
-                neuron_categories["Newly Appeared"].append(position)
-
-        # plot neurons with color coding
-        plt.figure(figsize=(14, 8))  # increased width of the plot
-        color_map = {
-            "Present in All": "green",
-            "Lost (never returned)": "red",
-            "Recovered": "blue",
-            "Newly Appeared": "yellow",
-            "Unique": "purple"
-        }
-
-        for category, positions in neuron_categories.items():
-            positions = np.array(positions)
-            if positions.size > 0:
-                plt.scatter(
-                    positions[:, 0], positions[:, 1],
-                    label=f"{category} ({len(positions)})",
-                    color=color_map[category], alpha=0.6, edgecolors='k'
-                )
-
-        # add main title and axis labels
-        plt.title("Neuron Status Overlay Across Datasets", fontsize=16)
-        plt.xlabel(r"Horizontal Position ($\mu$m)", fontsize=14)
-        plt.ylabel(r"Vertical Position ($\mu$m)", fontsize=14)
-
-        # restore legend within the plot area
-        plt.legend(title="Neuron Status", fontsize=12, title_fontsize=12)
-
-        # ======= UPDATED SECTION BEGINS: Simplify dataset names =======
-        simplified_names = []
-        for name in self.cleaned_names:
-            # remove trailing date and 'acqm' parts
-            name_no_date = re.sub(r'_\d{8}_acqm(\.zip)?$', '', name, flags=re.IGNORECASE)
-
-            # extract day identifier (Dxx) explicitly
-            day_match = re.search(r"(D\d+)", name_no_date, re.IGNORECASE)
-            day_identifier = day_match.group(1).upper() if day_match else ""
-
-            # remove the extracted day and any trailing underscores to form qualifier
-            qualifier_part = name_no_date.replace(day_identifier, "")
-            # remove any leading/trailing underscores and lower-case
-            qualifier = qualifier_part.strip("_").lower()
-
-            # Fallback to just the day identifier if qualifier ends up empty
-            simplified = f"{day_identifier}" if not qualifier else f"{day_identifier}_{qualifier}"
-            simplified_names.append(simplified)
-
-        print("Simplified names after preservation:", simplified_names)
-
-        # sort datasets by chronological order based on Dxx
-        def extract_day_identifier(name):
-            match = re.search(r"d(\d+)", name, re.IGNORECASE)
-            return int(match.group(1)) if match else float('inf')
-
-        sorted_indices = sorted(range(len(simplified_names)), key=lambda i: extract_day_identifier(simplified_names[i]))
-        simplified_names = [simplified_names[i] for i in sorted_indices]
-        total_counts = [total_counts[i] for i in sorted_indices]
-
-        # debug: print sorted names and counts
-        print("Sorted names and neuron counts:", list(zip(simplified_names, total_counts)))
-
-        # create mapping of Dxx and append clarifiers if needed
-        day_groups = defaultdict(list)
-        for name in simplified_names:
-            match = re.match(r"(D\d+)", name, re.IGNORECASE)
-            if match:
-                day = match.group(1).upper()
-                # extract qualifier if present after day identifier
-                qualifier = name[len(match.group(0)):].strip("_")
-                day_groups[day].append(qualifier)
-
-        # generate the final suptitle lines
-        subtitle_lines = []
-        for day, qualifiers in day_groups.items():
-            # filter out empty qualifiers
-            qualifiers = [q for q in qualifiers if q]
-            
-            # if there's only one dataset for the day
-            if len(qualifiers) <= 1:
-                # find index of dataset that starts with the day identifier using uppercase comparison
-                index = next(i for i, name in enumerate(simplified_names) if name.startswith(day))
-                subtitle_lines.append(f"{day}: {total_counts[index]} neurons")
-            else:
-                # compute common tokens among qualifiers to simplify them
-                common_tokens = set.intersection(*(set(q.split('_')) for q in qualifiers if q)) if qualifiers else set()
-                for qual in qualifiers:
-                    # remove common tokens from each qualifier
-                    tokens = [token for token in qual.split('_') if token not in common_tokens]
-                    simplified_qual = "_".join(tokens)
-                    identifier = f"{day}_{simplified_qual}" if simplified_qual else day
-                    # use original full identifier to find index
-                    original_identifier = f"{day}_{qual}" if qual else day
-                    try:
-                        index = simplified_names.index(original_identifier)
-                    except ValueError:
-                        index = None
-                    if index is not None:
-                        subtitle_lines.append(f"{identifier}: {total_counts[index]} neurons")
-
-        # insert line breaks between entries
-        subtitle_text = "\n".join(subtitle_lines)
-
-        # adjust layout to make the plot wider and text tighter
-        plt.tight_layout(rect=[0, 0, 0.85, 1])  # reclaim more space for the plot
-        plt.gcf().text(0.87, 0.5, subtitle_text, fontsize=12, va="center", ha="left", multialignment="left")  # adjusted font size
-
-        # save plot
-        output_file = os.path.join(output_path, "neuron_status_overlay.png")
-        plt.savefig(output_file, bbox_inches='tight')
-        plt.close()
-
     def plot_raw_footprint(self, output_path):
         plt.close('all')
         for i, neuron_data in enumerate(self.neuron_data_list):
@@ -2081,11 +1528,710 @@ class SpikeDataAnalysis:
             plt.savefig(os.path.join(output_path, f"footprint_plot_fr_{dataset_name}.png"))
             plt.close()
 
+    def compute_cv2(self):
+        """
+        Compute the CV2 score for each neuron in each dataset.
+        Returns a list (one per dataset) of arrays with CV2 scores.
+        """
+        cv2_list = []
+        for train in self.trains:
+            dataset_cv2 = []
+            for neuron_spikes in train:
+                isis = np.diff(neuron_spikes)
+                if len(isis) < 2:
+                    dataset_cv2.append(np.nan)
+                else:
+                    # CV2: 2*|ΔISI| / (ISIₙ + ISIₙ₊₁)
+                    cv2_vals = 2 * np.abs(np.diff(isis)) / (isis[:-1] + isis[1:])
+                    dataset_cv2.append(np.nanmean(cv2_vals))
+            cv2_list.append(np.array(dataset_cv2))
+        return cv2_list
 
-    def run_all_analyses(self, output_folder, base_names, perform_pca=False, cleanup=True):
+    def plot_cv2_violin(self, output_path):
+        plt.close('all')
+        for i, cv2_vals in enumerate(self.compute_cv2()):
+            cv2_list = self.compute_cv2()
+            plt.figure(figsize=(12, 8))
+            plt.violinplot(cv2_list, showmeans=True, showmedians=True)
+            plt.xticks(ticks=np.arange(1, len(self.cleaned_names)+1), labels=self.cleaned_names, rotation=45)
+            plt.xlabel("Dataset")
+            plt.ylabel("CV2")
+            plt.title("CV2 Score Distribution Across Datasets")
+            plt.tight_layout()
+            save_path = os.path.join(output_path, "cv2_violin.png")
+            plt.savefig(save_path)
+            plt.close()
+
+    def plot_fr_heatmap(self, output_path):
+        """
+        For each dataset, compute a 2D heat map of average firing rate by position.
+        Uses the neuron positions (from self.neuron_data_list) and the average firing rates
+        (from self.firing_rates_list) to compute a weighted 2D histogram, applies Gaussian smoothing,
+        and plots the result.
+        """
+        from scipy.ndimage import gaussian_filter
+        plt.close('all')
+
+        # Loop over datasets
+        for i, neuron_data in enumerate(self.neuron_data_list):
+            dataset_name = self.cleaned_names[i]
+            print(f"Plotting firing rate heat map for {dataset_name}")
+            
+            # Collect positions and firing rates for valid neurons (exclude calibration electrode)
+            positions = []
+            frates = []
+            for j, neuron in enumerate(neuron_data.values()):
+                x, y = neuron['position']
+                if (x, y) != (0, 0):
+                    positions.append([x, y])
+                    frates.append(self.firing_rates_list[i][j])
+            positions = np.array(positions)
+            frates = np.array(frates)
+            
+            # Define grid limits from the positions (with a margin)
+            margin = 50
+            x_min, x_max = positions[:, 0].min() - margin, positions[:, 0].max() + margin
+            y_min, y_max = positions[:, 1].min() - margin, positions[:, 1].max() + margin
+            
+            # Define grid resolution (number of bins)
+            n_bins = 150  # adjust as needed
+            x_edges = np.linspace(x_min, x_max, n_bins+1)
+            y_edges = np.linspace(y_min, y_max, n_bins+1)
+            
+            # Compute a weighted 2D histogram: in each bin, average the firing rate of neurons that fall there.
+            # First, compute sum of rates and counts per bin.
+            rate_sum, _, _ = np.histogram2d(positions[:, 0], positions[:, 1], bins=[x_edges, y_edges], weights=frates)
+            counts, _, _ = np.histogram2d(positions[:, 0], positions[:, 1], bins=[x_edges, y_edges])
+            
+            # Avoid divide-by-zero: where counts==0, set average to 0.
+            avg_rate = np.divide(rate_sum, counts, out=np.zeros_like(rate_sum), where=counts!=0)
+            
+            # Apply Gaussian smoothing
+            sigma = 3  # adjust sigma in bin units
+            smoothed_rate = gaussian_filter(avg_rate, sigma=sigma)
+            
+            # Plot heatmap (with origin lower so that y increases upward)
+            plt.figure(figsize=(10, 8))
+            extent = [x_edges[0], x_edges[-1], y_edges[0], y_edges[-1]]
+            plt.imshow(smoothed_rate.T, cmap='hot', interpolation='nearest', origin='lower', extent=extent)
+            plt.colorbar(label="Average Firing Rate (Hz)")
+            plt.xlabel("Horizontal Position (µm)")
+            plt.ylabel("Vertical Position (µm)")
+            plt.title(f"Firing Rate Heat Map: {dataset_name}")
+            plt.tight_layout()
+            save_path = os.path.join(output_path, f"firing_rate_heatmap_{dataset_name}.png")
+            plt.savefig(save_path)
+            plt.close()
+
+    def plot_avg_distance_histogram(self, output_path, bins_range=(0, 1000), n_bins=50):
+        """
+        For each dataset, compute the average Euclidean distance (per neuron) to all other neurons,
+        and plot a histogram (line plot) with the number of neurons (y-axis) versus distance (x-axis).
+        
+        Parameters:
+            output_path : Directory where the plot will be saved.
+            bins_range  : Tuple (min, max) for the x-axis in µm. Default is (0, 1000).
+            n_bins      : Number of bins to use.
+        """
+        for i, neuron_data in enumerate(self.neuron_data_list):
+            dataset_name = self.cleaned_names[i]
+            positions = []
+            for j, neuron in enumerate(neuron_data.values()):
+                pos = neuron['position']
+                # Use np.allclose to compare arrays
+                if not np.allclose(pos, [0, 0]):
+                    positions.append(pos)
+            positions = np.array(positions)
+            if positions.size == 0:
+                print(f"No valid positions for dataset {dataset_name}")
+                continue
+
+            # Compute pairwise distances and then the average distance per neuron.
+            dist_matrix = np.linalg.norm(positions[:, None] - positions, axis=2)
+            np.fill_diagonal(dist_matrix, np.nan)
+            avg_distance = np.nanmean(dist_matrix, axis=1)
+
+            # Define fixed bins over bins_range
+            bin_edges = np.linspace(bins_range[0], bins_range[1], n_bins+1)
+            counts, _ = np.histogram(avg_distance, bins=bin_edges)
+            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+            plt.figure(figsize=(8, 6))
+            plt.plot(bin_centers, counts, marker='o', linestyle='-', color='blue')
+            plt.xlabel("Average Distance (µm)")
+            plt.ylabel("Number of Neurons")
+            plt.title(f"Neuron Count vs. Average Distance: {dataset_name}")
+            plt.xlim(bins_range)
+            plt.tight_layout()
+            save_path = os.path.join(output_path, f"avg_distance_histogram_{dataset_name}.png")
+            plt.savefig(save_path)
+            plt.close()
+
+
+    def plot_avg_distance_histogram_overlay(self, output_path=None, bins_range=(0, 1000), n_bins=10):
+        """
+        Overlay the histograms of average distances for all datasets on one plot.
+        
+        Parameters:
+            output_path : (Optional) Directory where the plot will be saved. If None, the figure is not saved.
+            bins_range  : Tuple (min, max) for the x-axis in µm.
+            n_bins      : Number of bins to use.
+            
+        Returns:
+            fig, ax : The matplotlib figure and axes objects.
+        """
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        bin_edges = np.linspace(bins_range[0], bins_range[1], n_bins + 1)
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        # Choose a colormap with as many distinct colors as datasets.
+        colors = plt.cm.viridis(np.linspace(0, 1, len(self.neuron_data_list)))
+        
+        for i, neuron_data in enumerate(self.neuron_data_list):
+            dataset_name = self.cleaned_names[i]
+            positions = []
+            for neuron in neuron_data.values():
+                pos = neuron['position']
+                if not np.allclose(pos, [0, 0]):
+                    positions.append(pos)
+            positions = np.array(positions)
+            if positions.size == 0:
+                print(f"No valid positions for dataset {dataset_name}")
+                continue
+            dist_matrix = np.linalg.norm(positions[:, None] - positions, axis=2)
+            np.fill_diagonal(dist_matrix, np.nan)
+            avg_distance = np.nanmean(dist_matrix, axis=1)
+            counts, _ = np.histogram(avg_distance, bins=bin_edges)
+            ax.plot(bin_centers, counts, marker='o', linestyle='-', color=colors[i], label=dataset_name)
+        
+        ax.set_xlabel("Average Distance (µm)")
+        ax.set_ylabel("Number of Neurons")
+        ax.set_title("Overlay of Neuron Count vs. Average Distance")
+        ax.set_xlim(bins_range)
+        ax.legend()
+        fig.tight_layout()
+        
+        if output_path is not None:
+            save_path = os.path.join(output_path, "avg_distance_histogram_overlay.png")
+            fig.savefig(save_path)
+        
+        return fig, ax
+
+
+
+    def plot_line_avg_distance_vs_sttc_with_counts(self, output_path=None, bins_range=(0, 1000), n_bins=20):
+        """
+        For each dataset, bin neurons by their average distance and compute for each bin:
+        - the average STTC (calculated as the sum of STTC values with all other neurons divided by (N-1))
+        - the number of neurons in that bin.
+        Then, plot a line graph of average STTC versus average distance along with a bar plot of the neuron count
+        (using a twin y-axis).
+        
+        Parameters:
+            output_path : (Optional) Directory where the plots will be saved.
+            bins_range  : Tuple (min, max) for the x-axis (µm). Default is (0, 1000).
+            n_bins      : Number of bins to use.
+            
+        Returns:
+            figures  : A list of matplotlib figure objects (one per dataset).
+            axes_list: A list of tuples (ax1, ax2) where ax1 is the primary axis and ax2 is its twin.
+        """
+        figures = []
+        axes_list = []
+        
+        for i, train in enumerate(self.trains):
+            dataset_name = self.cleaned_names[i]
+            duration = self.durations[i]
+            sttc_mat = self.compute_sttc_matrix(train, duration)
+            # Compute per-neuron average STTC (exclude self by subtracting diagonal)
+            sttc_sum = np.sum(sttc_mat, axis=1) - np.diag(sttc_mat)
+            avg_sttc_all = sttc_sum / (len(train) - 1)
+            
+            # Get valid neuron positions.
+            neuron_data = self.neuron_data_list[i]
+            positions = []
+            for neuron in neuron_data.values():
+                pos = neuron['position']
+                if not np.allclose(pos, [0, 0]):
+                    positions.append(pos)
+            positions = np.array(positions)
+            if positions.size == 0:
+                print(f"No valid positions for dataset {dataset_name}")
+                continue
+
+            # Compute average distance per neuron.
+            dist_matrix = np.linalg.norm(positions[:, None] - positions, axis=2)
+            np.fill_diagonal(dist_matrix, np.nan)
+            avg_distance = np.nanmean(dist_matrix, axis=1)
+            
+            # Restrict avg_sttc to valid neurons (assumed to be in the same order as positions).
+            avg_sttc = np.array(avg_sttc_all)[np.arange(len(positions))]
+            
+            # Bin the neurons by average distance.
+            bin_edges = np.linspace(bins_range[0], bins_range[1], n_bins + 1)
+            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+            mean_sttc_bins = []
+            counts_bins = []
+            for b in range(n_bins):
+                mask = (avg_distance >= bin_edges[b]) & (avg_distance < bin_edges[b+1])
+                if np.any(mask):
+                    mean_sttc_bins.append(np.nanmean(avg_sttc[mask]))
+                    counts_bins.append(np.sum(mask))
+                else:
+                    mean_sttc_bins.append(np.nan)
+                    counts_bins.append(0)
+            
+            # Create the plot with a twin y-axis.
+            fig, ax1 = plt.subplots(figsize=(8, 6))
+            color1 = 'tab:blue'
+            ax1.plot(bin_centers, mean_sttc_bins, marker='o', linestyle='-', color=color1, label="Avg STTC")
+            ax1.set_xlabel("Average Distance (µm)")
+            ax1.set_ylabel("Average STTC", color=color1)
+            ax1.tick_params(axis='y', labelcolor=color1)
+            ax1.set_xlim(bins_range)
+            ax1.set_title(f"Avg STTC vs. Average Distance with Unit Counts: {dataset_name}")
+            
+            ax2 = ax1.twinx()
+            color2 = 'tab:red'
+            ax2.bar(bin_centers, counts_bins, width=(bin_edges[1] - bin_edges[0]) * 0.8,
+                    alpha=0.3, color=color2, label="Neuron Count")
+            ax2.set_ylabel("Number of Neurons", color=color2)
+            ax2.tick_params(axis='y', labelcolor=color2)
+            
+            fig.tight_layout()
+            
+            if output_path is not None:
+                save_path = os.path.join(output_path, f"line_avg_distance_vs_sttc_with_counts_{n_bins}_{dataset_name}.png")
+                fig.savefig(save_path)
+            
+            figures.append(fig)
+            axes_list.append((ax1, ax2))
+        
+        return figures, axes_list
+
+    def plot_line_avg_distance_vs_sttc(self, output_path=None):
+        """
+        For each dataset, compute for each valid neuron its average Euclidean distance to all other neurons
+        and its average STTC (sum of pairwise STTC divided by [N-1]). Then, sort the neurons by average distance
+        and plot a line graph of average STTC versus average distance.
+        
+        Parameters:
+            output_path : (Optional) Directory where the plots will be saved.
+            
+        Returns:
+            figures  : A list of matplotlib figure objects (one per dataset).
+            axes_list: A list of axes objects corresponding to each figure.
+        """
+
+        figures = []
+        axes_list = []
+        
+        for i, train in enumerate(self.trains):
+            dataset_name = self.cleaned_names[i]
+            duration = self.durations[i]
+            # Compute the STTC matrix and then average STTC per neuron.
+            sttc_mat = self.compute_sttc_matrix(train, duration)
+            sttc_sum = np.sum(sttc_mat, axis=1) - np.diag(sttc_mat)
+            avg_sttc_all = sttc_sum / (len(train) - 1)
+            
+            # Extract positions and record the corresponding indices.
+            neuron_data = self.neuron_data_list[i]
+            positions = []
+            valid_indices = []
+            for j, neuron in enumerate(neuron_data.values()):
+                pos = neuron['position']
+                if not np.allclose(pos, [0, 0]):
+                    positions.append(pos)
+                    valid_indices.append(j)
+            positions = np.array(positions)
+            if positions.size == 0:
+                print(f"No valid positions for dataset {dataset_name}")
+                continue
+
+            # Compute pairwise distances among valid neurons and then the average distance per valid neuron.
+            dist_matrix = np.linalg.norm(positions[:, None] - positions, axis=2)
+            np.fill_diagonal(dist_matrix, np.nan)
+            avg_distance = np.nanmean(dist_matrix, axis=1)
+            
+            # Restrict avg_sttc to valid neurons:
+            avg_sttc = np.array(avg_sttc_all)[valid_indices]
+            
+            # Sort the neurons by their average distance.
+            sort_indices = np.argsort(avg_distance)
+            sorted_avg_distance = avg_distance[sort_indices]
+            sorted_avg_sttc = avg_sttc[sort_indices]
+            
+            # Plot the line graph.
+            fig, ax = plt.subplots(figsize=(8, 6))
+            ax.plot(sorted_avg_distance, sorted_avg_sttc, marker='o', linestyle='-', color='darkgreen')
+            ax.set_xlabel("Average Distance to Other Neurons (µm)")
+            ax.set_ylabel("Average STTC")
+            ax.set_title(f"Average STTC vs. Average Distance: {dataset_name}")
+            fig.tight_layout()
+            
+            if output_path is not None:
+                save_path = os.path.join(output_path, f"line_avg_distance_vs_sttc_{dataset_name}.png")
+                fig.savefig(save_path)
+            
+            figures.append(fig)
+            axes_list.append(ax)
+        
+        return figures, axes_list
+
+
+    def randomize_raster(self, spike_trains, seed=None):
+        """
+        Randomizes spike times while preserving the total number of spikes per neuron. Does not perserve the isi
+        
+        Parameters:
+        spike_trains : list of arrays
+            Each entry is an array of spike times for a neuron.
+        seed : int (optional)
+            Random seed for reproducibility.
+
+        Returns:
+        randomized_trains : list of arrays
+            Randomized spike trains with preserved firing rates.
+        """
+        rng = np.random.default_rng(seed)  # Random generator
+        num_neurons = len(spike_trains)
+        duration = max([max(times) for times in spike_trains if len(times) > 0])  # Get max time
+        
+        # Convert spike times to binary raster (bins=1 ms for simplicity)
+        bin_size = 1  # 1ms bins
+        num_bins = int(np.ceil(duration / bin_size))
+        raster = np.zeros((num_neurons, num_bins), dtype=int)
+
+        for i, spikes in enumerate(spike_trains):
+            if len(spikes) > 0:
+                indices = (spikes / bin_size).astype(int)
+                raster[i, indices] = 1  # Assign spikes to bins
+
+        # Shuffle spike times while preserving neuron firing rates
+        randomized_raster = np.zeros_like(raster)
+        for i in range(num_neurons):
+            spike_count = np.sum(raster[i])  # Total spikes for this neuron
+            spike_positions = rng.choice(num_bins, size=spike_count, replace=False)  # Shuffle spike locations
+            randomized_raster[i, spike_positions] = 1  # Assign new spike locations
+
+        # Convert back to spike time format
+        randomized_trains = [np.where(randomized_raster[i])[0] * bin_size for i in range(num_neurons)]
+        
+        return randomized_trains
+    
+    def compute_filtered_sttc(self, spike_train, length, delt=20, n_shuffles=5, threshold_type="hard"):
+        """
+        Compute STTC for real and shuffled spike trains, filtering out non-significant values.
+
+        Parameters:
+        spike_train : list of arrays
+            Spike times for each neuron.
+        length : float
+            Duration of recording.
+        delt : int, optional
+            STTC window parameter.
+        n_shuffles : int, optional
+            Number of times to shuffle the spike trains.
+        threshold_type : str, optional
+            "hard" - Keep STTC values greater than the shuffled mean.
+            "statistical" - Keep STTC values greater than the 95th percentile of shuffled STTC.
+
+        Returns:
+        sttc_matrix_filtered : np.ndarray
+            STTC matrix with only significant values kept.
+        """
+        real_sttc = self.compute_sttc_matrix(spike_train, length, delt)  # Compute real STTC
+
+        shuffled_sttcs = []
+        for _ in range(n_shuffles):
+            randomized_train = self.randomize_raster(spike_train)
+            shuffled_sttcs.append(self.compute_sttc_matrix(randomized_train, length, delt))
+        
+        shuffled_sttc_mean = np.mean(shuffled_sttcs, axis=0)
+        shuffled_sttc_percentile = np.percentile(shuffled_sttcs, 95, axis=0)
+
+        print("Sample real STTC values before filtering:")
+        print(real_sttc[:5, :5])  # Print a small portion of the STTC matrix
+
+        print("Sample shuffled STTC values before filtering:")
+        print(shuffled_sttc_mean[:5, :5])  # Print the shuffled mean STTC
+
+        print("Sample shuffled 95th Percentile STTC values:")
+        print(shuffled_sttc_percentile[:5, :5])  # Print the shuffled 95th percentile
+
+        #filter
+        if threshold_type == "hard":
+            sttc_pure = real_sttc - shuffled_sttc_mean  # Subtract shuffled STTC mean
+            sttc_matrix_filtered = np.where(sttc_pure > 0, sttc_pure, 0)  # Keep only positive values
+        elif threshold_type == "statistical":
+            sttc_pure = real_sttc - shuffled_sttc_percentile  # Subtract 95th percentile shuffled STTC
+            sttc_matrix_filtered = np.where(sttc_pure > 0, sttc_pure, 0)  # Keep only positive values
+        else:
+            raise ValueError("Invalid threshold_type. Choose 'hard' or 'statistical'.")
+        
+        print(f"Applying threshold: {threshold_type}")
+
+        print(f"Total STTC values before filtering (non-NaN): {np.sum(~np.isnan(real_sttc))}")
+        print(f"Total STTC values after filtering (non-NaN): {np.sum(~np.isnan(sttc_matrix_filtered))}")
+
+
+        print(f"Real STTC mean: {np.nanmean(real_sttc):.4f}, min: {np.nanmin(real_sttc):.4f}, max: {np.nanmax(real_sttc):.4f}")
+        print(f"Shuffled STTC mean: {np.nanmean(shuffled_sttc_mean):.4f}, min: {np.nanmin(shuffled_sttc_mean):.4f}, max: {np.nanmax(shuffled_sttc_mean):.4f}")
+        print(f"95th Percentile of Shuffled STTC: {np.nanpercentile(shuffled_sttcs, 95):.4f}")
+
+        return sttc_matrix_filtered
+    
+
+    def plot_sttc_vs_distance(self, output_path, n_bins=5, global_bins=None, filter_shuffled=True, threshold_type="hard"):
+        """
+        For each dataset, compute each neuron's average STTC (only retaining a connection if the real STTC 
+        exceeds the average shuffled STTC value). Then, for neurons with valid positions (non-[0,0]),
+        compute the average Euclidean distance to all other valid neurons. Using a fixed global range 
+        (e.g. 200–1000 µm) divided into 5 bins, bin the neurons by distance and plot:
+        - A violin plot (one violin per bin) of the neuron's average STTC.
+        - A scatter plot of average STTC vs. average distance.
+
+        Parameters:
+        output_path    : str
+            Directory where plots are saved.
+        n_bins         : int, optional
+            Number of distance bins (default 5).
+        global_bins    : np.ndarray or list, optional
+            Fixed bin edges (e.g. [200,360,520,680,840,1000]). If None, they are computed from the data.
+        filter_shuffled: bool, optional
+            Whether to filter STTC by comparing to the shuffled average.
+        threshold_type : str, optional
+            "hard" (keep connection if real STTC > average shuffled STTC) 
+            or "statistical" (keep connection if real STTC > 95th percentile of shuffled STTC).
+        """
+
+        plt.close('all')
+
+        for i, train in enumerate(self.trains):
+            duration = self.durations[i]
+
+            # 1. Compute the STTC matrix (filtered if requested)
+            if filter_shuffled:
+                sttc_mat = self.compute_filtered_sttc(train, duration, n_shuffles=5, threshold_type=threshold_type)
+            else:
+                sttc_mat = self.compute_sttc_matrix(train, duration)
+            print(f"Dataset {self.cleaned_names[i]}: STTC matrix shape: {sttc_mat.shape}, non-NaN entries: {np.sum(~np.isnan(sttc_mat))}")
+
+            # 2. For each neuron, compute its average STTC (excluding self).
+            n_neurons = sttc_mat.shape[0]
+            avg_sttc = np.empty(n_neurons)
+            for j in range(n_neurons):
+                # Remove the self-correlation (diagonal)
+                row = np.delete(sttc_mat[j, :], j)
+                avg_sttc[j] = np.nanmean(row)
+            print(f"Computed average STTC across all neurons, overall mean: {np.nanmean(avg_sttc):.4f}")
+
+            # 3. Extract valid neuron positions (drop only neurons at [0,0])
+            neuron_data = self.neuron_data_list[i]
+            positions_list = []
+            valid_indices = []
+            for j, neuron in enumerate(neuron_data.values()):
+                pos = neuron['position']
+                if not np.allclose(pos, [0, 0]):
+                    positions_list.append(pos)
+                    valid_indices.append(j)
+            positions = np.array(positions_list)
+            if positions.size == 0:
+                print(f"No valid positions for dataset {self.cleaned_names[i]}")
+                return
+
+            # Restrict average STTC to valid neurons.
+            avg_sttc_valid = avg_sttc[valid_indices]
+            print(f"Valid neurons (with positions) count: {len(valid_indices)}; non-NaN avg STTC among them: {np.sum(~np.isnan(avg_sttc_valid))}")
+
+            # 4. Compute each valid neuron's average distance to all other valid neurons.
+            #    (This is done from the positions of valid neurons.)
+            dist_matrix = np.linalg.norm(positions[:, np.newaxis] - positions, axis=2)
+            np.fill_diagonal(dist_matrix, np.nan)
+            avg_distance = np.nanmean(dist_matrix, axis=1)
+            print(f"Average distance: min={np.nanmin(avg_distance):.2f}, max={np.nanmax(avg_distance):.2f}")
+            print("First 10 avg_distance values:", avg_distance[:10])
+
+            # 5. Set up fixed global bins.
+            if global_bins is None:
+                # Compute from the data range if not provided
+                global_bins = np.linspace(np.floor(np.nanmin(avg_distance)),
+                                            np.ceil(np.nanmax(avg_distance)), n_bins + 1)
+            else:
+                global_bins = np.array(global_bins)
+            print(f"Global bins used: {global_bins}")
+
+            # 6. Bin neurons by avg_distance.
+            bin_labels = [f"{global_bins[b]:.1f}-{global_bins[b+1]:.1f}" for b in range(n_bins)]
+            sttc_bins = {label: [] for label in bin_labels}
+
+            for b in range(n_bins):
+                if b < n_bins - 1:
+                    mask = (avg_distance >= global_bins[b]) & (avg_distance < global_bins[b+1])
+                else:
+                    mask = (avg_distance >= global_bins[b]) & (avg_distance <= global_bins[b+1])
+                n_in_bin = np.sum(mask)
+                print(f"Bin {b} ({bin_labels[b]}) - Neurons in bin: {n_in_bin}")
+                if n_in_bin > 0:
+                    sttc_bins[bin_labels[b]] = avg_sttc_valid[mask]
+                else:
+                    # Even if no neuron falls in this bin, assign an array with a single NaN,
+                    # so that the bin will still appear (and colors/order remains constant).
+                    sttc_bins[bin_labels[b]] = np.array([np.nan])
+
+            # 7. Create a DataFrame for the violin plot.
+            #    We want one row per neuron (with its bin label and its average STTC)
+            bin_col = []
+            sttc_col = []
+            for label, vals in sttc_bins.items():
+                bin_col.extend([label] * len(vals))
+                sttc_col.extend(vals)
+            df = pd.DataFrame({
+                "Distance Bin": bin_col,
+                "Average STTC": sttc_col
+            })
+            print(f"Total neurons for plotting (should equal valid neuron count): {len(df)}")
+
+            ## 8. Violin Plot (binned)
+            plt.figure(figsize=(8, 6))
+            sns.violinplot(x="Distance Bin", y="Average STTC", data=df, inner="quartile", palette="Set3")
+            plt.xlabel("Average Separation Distance (µm)")
+            plt.ylabel("Average STTC")
+            plt.ylim(0,1)
+            plt.title(f"STTC by Distance: {self.cleaned_names[i]}")
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            save_path = os.path.join(output_path, f"sttc_vs_distance_violin_{self.cleaned_names[i]}.png")
+            plt.savefig(save_path)
+            plt.close()
+
+            ## 9. Scatter Plot (unbinned)
+            plt.figure(figsize=(8, 6))
+            plt.scatter(avg_distance, avg_sttc_valid, c='darkorange', edgecolor='k', s=60, alpha=0.8)
+            plt.xlabel("Average Distance (µm)")
+            plt.ylabel("Average STTC")
+            plt.ylim(0,1)
+            plt.title(f"Average STTC vs. Average Distance: {self.cleaned_names[i]}")
+            plt.tight_layout()
+            save_path = os.path.join(output_path, f"sttc_vs_distance_{self.cleaned_names[i]}.png")
+            plt.savefig(save_path)
+            plt.close()
+
+
+    def plot_sttc_heatmap(self, output_path, n_bins_distance=50, global_bins=None, n_bins_sttc=50, 
+                        filter_shuffled=True, threshold_type="hard", heatmap_vmax=10):
+        """
+        Generates a heatmap of neuron pair counts over STTC and distance bins.
+        
+        For each dataset:
+        - The filtered STTC matrix is computed (real minus shuffled, with negatives set to 0).
+        - Valid neurons (positions ≠ [0,0]) are identified.
+        - The pairwise distance matrix is computed from their positions.
+        - Only the upper triangle (unique pairs) is used.
+        - A 2D histogram is computed using fixed bins:
+                * Distance: global_bins (e.g. computed from 200 to 1000 µm)
+                * STTC: bins from 0 to 1.
+        - The resulting count matrix is smoothed for better visual appearance.
+        
+        Parameters:
+            output_path    : str
+                Directory where plots are saved.
+            n_bins_distance: int, optional
+                Number of distance bins (if global_bins not provided).
+            global_bins    : np.ndarray or list, optional
+                Fixed bin edges for distance (e.g. [200,360,...,1000]). If None, computed from data.
+            n_bins_sttc    : int, optional
+                Number of STTC bins between 0 and 1 (default 50).
+            filter_shuffled: bool, optional
+                Whether to filter STTC using shuffled data.
+            threshold_type : str, optional
+                "hard" (real STTC > mean shuffled) or "statistical" (real STTC > 95th percentile of shuffled).
+            heatmap_vmax   : float, optional
+                Maximum color intensity for heatmap standardization.
+        """
+        from scipy.ndimage import gaussian_filter
+
+        plt.close('all')
+
+        for i, train in enumerate(self.trains):
+            duration = self.durations[i]
+
+            # Compute the filtered STTC matrix.
+            if filter_shuffled:
+                sttc_mat = self.compute_filtered_sttc(train, duration, n_shuffles=5, threshold_type=threshold_type)
+            else:
+                sttc_mat = self.compute_sttc_matrix(train, duration)
+            print(f"Dataset {self.cleaned_names[i]}: STTC matrix shape: {sttc_mat.shape}, non-NaN: {np.sum(~np.isnan(sttc_mat))}")
+
+            # Extract valid neurons and restrict matrices.
+            neuron_data = self.neuron_data_list[i]
+            positions_list = []
+            valid_indices = []
+            for j, neuron in enumerate(neuron_data.values()):
+                pos = neuron['position']
+                if not np.allclose(pos, [0, 0]):
+                    positions_list.append(pos)
+                    valid_indices.append(j)
+            positions = np.array(positions_list)
+            if positions.size == 0:
+                print(f"No valid positions for dataset {self.cleaned_names[i]}")
+                continue
+
+            sttc_filtered = sttc_mat[np.ix_(valid_indices, valid_indices)]
+            dist_matrix = np.linalg.norm(positions[:, None] - positions, axis=2)
+
+            # Use only the upper triangle (unique pairs)
+            triu_indices = np.triu_indices(len(valid_indices), k=1)
+            sttc_values = sttc_filtered[triu_indices]
+            distance_values = dist_matrix[triu_indices]
+
+            # Define distance bins.
+            if global_bins is None:
+                global_bins = np.linspace(np.floor(np.nanmin(distance_values)),
+                                        np.ceil(np.nanmax(distance_values)),
+                                        n_bins_distance + 1)
+            else:
+                global_bins = np.array(global_bins)
+            # Define STTC bins from 0 to 1.
+            sttc_bins = np.linspace(0, 1, n_bins_sttc + 1)
+            print("Global distance bins:", global_bins)
+            print("STTC bins:", sttc_bins)
+
+            # Compute a 2D histogram.
+            heatmap_matrix, _, _ = np.histogram2d(distance_values, sttc_values, bins=[global_bins, sttc_bins])
+            print("Raw heatmap matrix (counts):")
+            print(heatmap_matrix)
+
+            # Apply Gaussian smoothing.
+            smoothed_matrix = gaussian_filter(heatmap_matrix, sigma=1.5)
+
+            # Create tick labels, but only show a subset to avoid crowding.
+            full_xticks = [f"{edge:.1f}" for edge in sttc_bins[:-1]]
+            full_yticks = [f"{global_bins[k]:.1f}-{global_bins[k+1]:.1f}" for k in range(len(global_bins)-1)]
+            # For instance, show every 10th label:
+            xtick_labels = [full_xticks[i] if i % 10 == 0 else "" for i in range(len(full_xticks))]
+            ytick_labels = [full_yticks[i] if i % 10 == 0 else "" for i in range(len(full_yticks))]
+
+            plt.figure(figsize=(8, 6))
+            ax = sns.heatmap(smoothed_matrix, cmap="viridis", vmin=0, vmax=heatmap_vmax, fmt=".0f",
+                            xticklabels=xtick_labels,
+                            yticklabels=ytick_labels)
+            ax.invert_yaxis()
+            plt.xlabel("STTC Value")
+            plt.ylabel("Distance (µm)")
+            plt.title(f"Neuron Pair Counts: STTC vs Distance - {self.cleaned_names[i]}")
+            plt.xticks(rotation=45)
+            plt.yticks(rotation=0)
+            plt.tight_layout()
+
+            save_path = os.path.join(output_path, f"sttc_heatmap_{self.cleaned_names[i]}.png")
+            plt.savefig(save_path)
+            plt.close()
+
+
+    def run_all_analyses(self, output_folder, base_names, cleanup=True):
         """
         Execute all analyses for individual datasets and comparisons.
-        Includes optional PCA analysis if `perform_pca` is True.
         """
         os.makedirs(output_folder, exist_ok=True)
 
@@ -2140,23 +2286,6 @@ class SpikeDataAnalysis:
             self.sttc_violin_plot_by_proximity_individual(dataset_dir)
             self.plot_raw_footprint(dataset_dir)
 
-            if perform_pca:
-                  #creating a pca subdirectory for each dataset
-                pca_dir = os.path.join(dataset_dir, "pca")
-                os.makedirs(pca_dir, exist_ok=True)
-
-                # define a subset of neurons, if needed
-                subset_neurons = None
-
-                # individual PCA calculations
-                pca_results = self.calculate_individual_time_binned_pca(bin_size=0.1, subset_neurons=subset_neurons)  # individual time-binned PCA
-                results = self.calculate_static_pca_individual(subset_neurons=subset_neurons)  # individual static PCA
-                # individual PCA plotting
-                self.plot_individual_time_binned_pca(pca_results, pca_dir)  # individual time-binned PCA
-                self.plot_static_pca_individual(results, pca_dir)  # individual static PCA
-
-
-
         # generate comparison plots
         self.sttc_violin_plot_by_firing_rate_compare(comparison_dir)
         self.sttc_violin_plot_by_proximity_compare(comparison_dir)
@@ -2167,9 +2296,6 @@ class SpikeDataAnalysis:
         self.plot_comparison_kde_pdf(comparison_dir)
         self.analyze_burst_characteristics(comparison_dir)
 
-
-
-
         #linear comparisons
         metrics = ["sttc", "firing_rate", "isi"]
         for metric in metrics:
@@ -2179,17 +2305,7 @@ class SpikeDataAnalysis:
         if len(self.trains) >= 3:
             for metric in metrics:
                 self.plot_global_metric_comparison(global_dir, metric)
-
-
-        # optional PCA analysis
-        if perform_pca:
-            # define the subset of neurons, if needed 
-            subset_neurons = None  # replace with an integer to limit the number of neurons or leave as None
-            # aggregate PCA calculations
-            pca_result, explained_variance = self.calculate_static_fr_pca_whole(subset_neurons=subset_neurons)  # static aggregate PCA
-            # aggregate PCA plotting
-            self.plot_static_fr_pca_whole(pca_result, explained_variance, comparison_dir)  # averaged PCA
-
+                
         # zip output folder
         zip_filename = f"{output_folder}.zip"
         with zipfile.ZipFile(zip_filename, 'w') as zip_file:
@@ -2212,8 +2328,6 @@ def main():
     parser.add_argument("input_s3", nargs='+', help="Input file paths (S3 paths)")
     #output s3 paths argument
     parser.add_argument("output_path", help="Output S3 path for the zip file")
-    #optional flag for pca analysis
-    parser.add_argument("--pca", action="store_true", help="Perform PCA analysis on firing rates")
     #optional flag for cleanup
     parser.add_argument("--cleanup", action="store_true", help="Delete the output folder after zipping")
     args = parser.parse_args()
@@ -2221,7 +2335,6 @@ def main():
     #access parsed arguments
     input_s3 = args.input_s3
     output_s3 = args.output_path
-    perform_pca = args.pca
     cleanup = args.cleanup
 
     # functionality to download multiple s3 files
@@ -2244,7 +2357,7 @@ def main():
     local_output_folder = f'/tmp/output_plots_{combined_name}'
 
 
-    zip_filename = analysis.run_all_analyses(local_output_folder, analysis.cleaned_names, perform_pca=perform_pca, cleanup=cleanup)
+    zip_filename = analysis.run_all_analyses(local_output_folder, analysis.cleaned_names, cleanup=cleanup)
 
     output_s3 = os.path.join(output_s3, os.path.basename(zip_filename))
     # upload zip to S3
